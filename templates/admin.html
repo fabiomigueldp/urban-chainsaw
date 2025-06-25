@@ -3,1814 +3,1201 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Signal Processor - Admin</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js via CDN com versão UMD para compatibilidade -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
-    <!-- Chart.js Date Adapter - Necessário para escalas de tempo -->
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <!-- Fallback para Chart.js caso o CDN principal falhe -->
-    <script>
-        if (typeof Chart === 'undefined') {
-            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.js"><\/script>');
-            document.write('<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"><\/script>');
-        }
-    </script>
+    <title>Trading Signal Processor - Admin Dashboard</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     <style>
-        /* Estilos CSS permanecem os mesmos, pois estavam bem estruturados */
+        :root {
+            --bs-primary: #0d6efd;
+            --bs-success: #198754;
+            --bs-warning: #ffc107;
+            --bs-danger: #dc3545;
+            --bs-info: #0dcaf0;
+            --bs-dark: #212529;
+            --bs-light: #f8f9fa;
+        }
+        
         body {
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            background-color: #0f172a; /* slate-900 */
-            color: #e2e8f0; /* slate-200 */
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        .ticker-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-            gap: 0.75rem; /* 12px - Tailwind class 'gap-3' */
+        
+        .navbar-brand {
+            font-weight: bold;
+            font-size: 1.5rem;
         }
-        .metric-card {
-            background-color: #1e293b; /* slate-800 */
-            border: 1px solid #334155; /* slate-700 */
+        
+        .status-card {
+            transition: all 0.3s ease;
+            border: none;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
         }
-        .status-dot {
-            width: 10px;
-            height: 10px;
+        
+        .status-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        }
+        
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+        
+        .metric-label {
+            font-size: 0.875rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
             display: inline-block;
-            margin-right: 0.5rem;
+            margin-right: 8px;
         }
-        .status-dot.green { background-color: #22c55e; } /* green-500 */
-        .status-dot.yellow { background-color: #eab308; } /* yellow-500 */
-        .status-dot.red { background-color: #ef4444; } /* red-500 */
-        .status-dot.gray { background-color: #64748b; } /* slate-500 */
-
-        /* Custom scrollbar for ticker list */
-        #tickers-list-container::-webkit-scrollbar,
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
+        
+        .status-online {
+            background-color: var(--bs-success);
+            animation: pulse 2s infinite;
         }
-        #tickers-list-container::-webkit-scrollbar-track,
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: #1e293b; /* slate-800 */
-            border-radius: 10px;
+        
+        .status-offline {
+            background-color: var(--bs-danger);
         }
-        #tickers-list-container::-webkit-scrollbar-thumb,
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #475569; /* slate-600 */
-            border-radius: 10px;
+        
+        .status-paused {
+            background-color: var(--bs-warning);
         }
-        #tickers-list-container::-webkit-scrollbar-thumb:hover,
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #64748b; /* slate-500 */
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
-        .custom-scrollbar {
-             scrollbar-width: thin;
-             scrollbar-color: #475569 #1e293b;
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
         }
-
-        /* Webhook Rate Limiter Toggle Switch Styles */
-        .dot {
+        
+        .audit-table {
+            font-size: 0.875rem;
+        }
+        
+        .badge-status {
+            font-size: 0.75rem;
+        }
+        
+        .refresh-btn {
             transition: transform 0.3s ease;
         }
-        input:checked ~ .relative .dot {
-            transform: translateX(100%);
-        }
-        input:checked ~ .relative .block {
-            background-color: #4f46e5; /* indigo-600 */
+        
+        .refresh-btn:hover {
+            transform: rotate(180deg);
         }
         
-        /* Smooth transition for toggle background */
-        input[type="checkbox"] + div > div {
-            transition: background-color 0.3s ease;
-        }
-
-        /* Chart controls styling */
-        .chart-controls { display: flex; align-items: center; gap: 0.5rem; }
-        .chart-controls select { transition: all 0.2s ease; }
-        .chart-controls select:hover { border-color: #0ea5e9; }
-        .chart-controls button:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }
-
-        /* Chart legend customization */
-        .chart-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.5rem; font-size: 0.75rem; }
-        .chart-legend-item { display: flex; align-items: center; gap: 0.25rem; }
-        .chart-legend-color { width: 12px; height: 12px; border-radius: 2px; }
-
-        /* Ticker action buttons styling */
-        .ticker-actions {
-            position: absolute;
-            bottom: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 2px;
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1050;
+            min-width: 200px;
         }
         
-        .ticker-actions button {
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 3px;
-            transition: all 0.2s ease;
-            border: none;
-            cursor: pointer;
+        .filter-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            margin-bottom: 20px;
         }
         
-        .ticker-actions button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        .section-header {
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .action-buttons .btn {
+            margin: 0 5px 10px 0;
+        }
+        
+        .loading-spinner {
+            display: none;
+        }
+        
+        .table-responsive {
+            max-height: 500px;
+        }
+        
+        .progress-container {
+            margin: 10px 0;
+        }
+        
+        .alert-container {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1040;
+            max-width: 400px;
+        }
+        
+        .sell-all-ticker {
+            margin: 2px;
+            padding: 4px 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            display: inline-block;
         }
     </style>
 </head>
-<body class="flex flex-col min-h-screen">
-
-    <!-- O HTML do HEADER e MAIN permanece o mesmo -->
-    <header class="bg-slate-800 shadow-lg">
-        <div class="container mx-auto px-6 py-4">
-            <h1 class="text-3xl font-bold text-white">Trading Signal Processor - Admin Panel</h1>
+<body>
+    <!-- Connection Status Alert -->
+    <div id="connectionStatus" class="connection-status">
+        <div class="alert alert-info alert-dismissible" role="alert">
+            <i class="bi bi-wifi"></i> Conectando ao servidor...
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
-    </header>
-
-    <main class="flex-grow container mx-auto px-6 py-8 space-y-8">
-        <!-- O conteúdo de MAIN permanece o mesmo até o footer -->
-        <!-- Overview & Engine Control Section -->
-        <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-                <!-- Engine Status & Controls -->
-                <div class="md:col-span-1 space-y-3">
-                    <h2 class="text-xl font-semibold text-teal-400 mb-2 flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg>
-                        Engine Status & Control
-                    </h2>
-                    <div class="flex items-center">
-                        <span id="overview-engine-status-dot" class="status-dot gray"></span>
-                        <span id="overview-engine-status-text" class="text-lg font-semibold text-slate-300">Checking...</span>
-                    </div>
-                    <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
-                        <button id="pause-engine-btn" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50 flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
-                            Pause
-                        </button>
-                        <button id="resume-engine-btn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 flex items-center justify-center">
-                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clip-rule="evenodd" transform="rotate(90 10 10)"/></svg>
-                            Resume
-                        </button>
-                    </div>
-                     <button id="manual-refresh-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" /></svg>
-                        Manual Refresh
-                    </button>
-                    <div id="engine-control-message-box" class="mt-3 p-3 rounded-md text-sm" style="display: none;"></div>
-                </div>
-
-                <!-- Last Update Info -->
-                <div class="md:col-span-1 space-y-1">
-                    <h2 class="text-xl font-semibold text-teal-400 mb-2 flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        Last Update
-                    </h2>
-                    <div class="flex justify-between items-center py-1">
-                        <strong class="text-slate-400">Status:</strong>
-                        <span id="overview-last-update-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-700 text-slate-300">N/A</span>
-                    </div>
-                    <div class="flex justify-between items-center py-1">
-                        <strong class="text-slate-400">Successful:</strong>
-                        <span id="overview-last-successful-update" class="text-slate-300">N/A</span>
-                    </div>
-                    <div class="flex justify-between items-center py-1">
-                        <strong class="text-slate-400">Failed:</strong>
-                        <span id="overview-last-failed-update" class="text-slate-300">N/A</span>
-                    </div>
-                    <div class="flex justify-between items-center py-1">
-                        <strong class="text-slate-400">Duration:</strong>
-                        <span id="overview-last-update-duration" class="text-slate-300">N/A</span>
-                    </div>
-                </div>
-
-                <!-- Key Metrics -->
-                <div class="md:col-span-1 space-y-1">
-                     <h2 class="text-xl font-semibold text-teal-400 mb-2 flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        Quick Stats
-                    </h2>
-                    <div class="flex justify-between items-center py-1">
-                        <strong class="text-slate-400">Approved Tickers:</strong>
-                        <strong id="overview-num-tickers" class="text-2xl text-teal-400">0</strong>
-                    </div>
-                    <div class="flex justify-between items-center py-1">
-                        <strong class="text-slate-400">WebSocket:</strong>
-                        <span id="overview-websocket-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-700 text-slate-300">Connecting...</span>
-                    </div>
-                     <div class="flex justify-between items-center py-1">
-                        <strong class="text-slate-400">Finviz Elite:</strong>
-                        <span id="overview-elite-auth-status" class="text-slate-300">Checking...</span>
+    </div>
+    
+    <!-- Alert Container -->
+    <div id="alertContainer" class="alert-container"></div>
+    
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-graph-up-arrow"></i>
+                Trading Signal Processor
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text">
+                    <span id="connectionIndicator" class="status-indicator status-offline"></span>
+                    <span id="connectionText">Desconectado</span>
+                </span>
+            </div>
+        </div>
+    </nav>
+    
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <!-- Status Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card status-card text-center">
+                    <div class="card-body">
+                        <div class="metric-value text-primary" id="signalsReceived">-</div>
+                        <div class="metric-label">Sinais Recebidos</div>
+                        <small class="text-muted">Total desde início</small>
                     </div>
                 </div>
             </div>
-        </section>
-
-        <!-- Signal Audit Trail Section -->
-        <section class="bg-slate-800 p-6 rounded-lg shadow-xl mb-8">
-            <h2 class="text-2xl font-semibold text-white border-b border-slate-700 pb-3 mb-6 flex items-center">Signal Audit Trail</h2>
-
-            <div class="grid grid-cols-1 md:grid-cols-7 gap-4 mb-6 items-end">
-                <div class="md:col-span-2">
-                    <label for="audit-search-ticker" class="block text-sm font-medium text-slate-300 mb-1">Search Ticker / Signal ID</label>
-                    <input type="text" id="audit-search-ticker" name="audit-search-ticker" placeholder="Enter ticker symbol or signal ID..." class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                </div>
-                <div>
-                    <label for="audit-status-filter" class="block text-sm font-medium text-slate-300 mb-1">Status</label>
-                    <select id="audit-status-filter" name="audit-status-filter" class="w-full bg-slate-700 border border-slate-600 text-slate-100 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <option value="all">All</option>
-                        <option value="received">Received</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="forwarded_success">Success</option>
-                        <option value="forwarded_timeout">Timeout</option>
-                        <option value="forwarded_http_error">HTTP Error</option>
-                        <option value="forwarded_generic_error">Generic Error</option>
-                        <option value="discarded">Discarded</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="audit-location-filter" class="block text-sm font-medium text-slate-300 mb-1">Location</label>
-                    <select id="audit-location-filter" name="audit-location-filter" class="w-full bg-slate-700 border border-slate-600 text-slate-100 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <option value="all">All</option>
-                        <option value="processing_queue">Processing Queue</option>
-                        <option value="approved_queue">Approved Queue</option>
-                        <option value="worker_processing">Worker Processing</option>
-                        <option value="worker_forwarding">Worker Forwarding</option>
-                        <option value="completed">Completed</option>
-                        <option value="discarded">Discarded</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="audit-filter-start" class="block text-sm font-medium text-slate-300 mb-1">Start Date/Time</label>
-                    <input type="datetime-local" id="audit-filter-start" name="audit-filter-start" class="w-full bg-slate-700 border border-slate-600 text-slate-100 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none" style="color-scheme: dark;">
-                </div>
-                <div>
-                    <label for="audit-filter-end" class="block text-sm font-medium text-slate-300 mb-1">End Date/Time</label>
-                    <input type="datetime-local" id="audit-filter-end" name="audit-filter-end" class="w-full bg-slate-700 border border-slate-600 text-slate-100 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none" style="color-scheme: dark;">
-                </div>
-                <div class="md:col-span-1 flex space-x-2">
-                    <button id="apply-audit-filters-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 text-sm">Apply Filters</button>
-                    <button id="clear-audit-filters-btn" class="flex-1 bg-slate-600 hover:bg-slate-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-opacity-50 text-sm">Clear Filters</button>
-                </div>
-            </div>
-
-            <!-- Audit Statistics -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div class="bg-slate-700 p-3 rounded-md text-center">
-                    <div class="text-2xl font-bold text-white" id="audit-total-count">0</div>
-                    <div class="text-xs text-slate-400">Total Entries</div>
-                </div>
-                <div class="bg-slate-700 p-3 rounded-md text-center">
-                    <div class="text-2xl font-bold text-green-400" id="audit-approved-count">0</div>
-                    <div class="text-xs text-slate-400">Approved</div>
-                </div>
-                <div class="bg-slate-700 p-3 rounded-md text-center">
-                    <div class="text-2xl font-bold text-red-400" id="audit-rejected-count">0</div>
-                    <div class="text-xs text-slate-400">Rejected</div>
-                </div>
-                <div class="bg-slate-700 p-3 rounded-md text-center">
-                    <div class="text-2xl font-bold text-blue-400" id="audit-forwarded-count">0</div>
-                    <div class="text-xs text-slate-400">Forwarded</div>
-                </div>
-            </div>
-
-            <div class="mb-4 flex justify-between items-center text-sm text-slate-400">
-                <span id="audit-entries-info">Loading audit entries...</span>
-                <div class="flex items-center gap-3">
-                    <button id="show-all-entries-btn" class="hidden text-teal-400 hover:text-teal-300 underline cursor-pointer text-xs">
-                        Show All Entries
-                    </button>
-                    <span id="audit-scroll-info" class="hidden">Scroll down to load more entries</span>
-                </div>
-            </div>
-
-            <div id="audit-log-container" class="bg-slate-700 p-4 rounded-md min-h-[200px] max-h-[400px] overflow-y-auto custom-scrollbar">
-                <div id="audit-log-empty-message" class="text-slate-400 text-center py-8">No audit logs available for the selected period.</div>
-            </div>
-
-            <h3 class="text-xl font-semibold text-teal-400 mt-8 mb-4 border-t border-slate-700 pt-4">Audit Metrics</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div class="metric-card p-4 rounded-md">
-                <h4 class="text-lg font-medium text-slate-300 mb-2">Signal Status Distribution</h4>
-                <canvas id="status-pie-chart" class="max-h-[300px]"></canvas>
-              </div>
-              <div class="metric-card p-4 rounded-md">
-                <div class="flex justify-between items-center mb-4">
-                  <h4 class="text-lg font-medium text-slate-300">Signals Over Time</h4>
-                  <div class="chart-controls">
-                    <label class="text-xs text-slate-400">Intervalo:</label>
-                    <select id="chart-time-interval" class="bg-slate-700 border border-slate-600 text-slate-100 px-2 py-1 rounded text-xs focus:ring-teal-500 focus:border-teal-500">
-                      <option value="5" selected>5 min</option>
-                      <option value="15">15 min</option>
-                      <option value="30">30 min</option>
-                      <option value="60">1 hora</option>
-                    </select>
-                  </div>
-                </div>
-                <canvas id="signals-over-time-chart" class="max-h-[300px]"></canvas>
-                <div class="mt-3 flex justify-between items-center text-xs text-slate-400 border-t border-slate-700 pt-3">
-                  <div id="chart-stats" class="flex space-x-4">
-                    <span>Total: <span id="chart-total-signals" class="text-slate-200 font-medium">0</span></span>
-                    <span>Aprovados: <span id="chart-approved-signals" class="text-green-400 font-medium">0</span></span>
-                    <span>Rejeitados: <span id="chart-rejected-signals" class="text-red-400 font-medium">0</span></span>
-                    <span>Taxa: <span id="chart-approval-rate" class="text-violet-400 font-medium">0%</span></span>
-                  </div>
-                  <div id="chart-timespan" class="text-right">
-                    <span>Período: <span id="chart-time-span" class="text-slate-200 font-medium">0 min</span></span>
-                  </div>
-                </div>
-                <div class="chart-legend mt-2">
-                  <div class="chart-legend-item"><div class="chart-legend-color" style="background-color: #38bdf8;"></div><span class="text-slate-400">Total</span></div>
-                  <div class="chart-legend-item"><div class="chart-legend-color" style="background-color: #22c55e;"></div><span class="text-slate-400">Aprovados</span></div>
-                  <div class="chart-legend-item"><div class="chart-legend-color" style="background-color: #ef4444;"></div><span class="text-slate-400">Rejeitados</span></div>
-                  <div class="chart-legend-item"><div class="chart-legend-color" style="background-color: #8b5cf6;"></div><span class="text-slate-400">Taxa Aprovação (%)</span></div>
-                </div>
-              </div>
-            </div>
-        </section>
-
-        <!-- Manual Order Execution Section -->
-        <section class="bg-slate-800 p-6 rounded-lg shadow-xl mb-8">
-            <h2 class="text-2xl font-semibold text-white border-b border-slate-700 pb-3 mb-6 flex items-center">Manual Order Execution</h2>
-            <h3 class="text-xl font-semibold text-teal-400 mb-4">Sell All Accumulator</h3>
-            <div id="sell-all-list-container" class="bg-slate-700 p-4 rounded-md min-h-[150px] max-h-[300px] overflow-y-auto custom-scrollbar mb-4">
-                <p class="text-slate-400 text-sm italic">Tickers added for 'Sell All' will appear here...</p>
-            </div>
-            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
-                <button id="sell-all-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 flex items-center justify-center">Sell All Tickers</button>
-                <button id="clear-accumulator-btn" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50 flex items-center justify-center">Clear List</button>
-            </div>
-            <div id="sell-order-status-message" class="mt-3 p-3 rounded-md text-sm" style="display: none;"></div>
-        </section>
-
-        <!-- Main Content Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- Left Column: Monitoring -->
-            <div class="lg:col-span-2 space-y-8">
-                <h2 class="text-2xl font-semibold text-white border-b border-slate-700 pb-3 flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mr-3 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    Dashboard & Monitoring
-                </h2>
-                <!-- Signal Processing Metrics -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-                    <div class="flex justify-between items-center mb-6 border-b border-slate-700 pb-3">
-                        <h3 class="text-xl font-semibold text-teal-400 flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
-                            Signal Processing Metrics
-                        </h3>
-                        <button id="reset-metrics-btn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-3 rounded-md transition duration-150 ease-in-out text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            Reset
-                        </button>
+            <div class="col-md-3">
+                <div class="card status-card text-center">
+                    <div class="card-body">
+                        <div class="metric-value text-success" id="signalsApproved">-</div>
+                        <div class="metric-label">Sinais Aprovados</div>
+                        <small class="text-muted">Passou no filtro Top-N</small>
                     </div>
-                    <div class="mb-4 text-xs text-slate-400 flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        Metrics tracking since: <span id="metrics-start-time" class="text-slate-300 ml-1">Calculating...</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card status-card text-center">
+                    <div class="card-body">
+                        <div class="metric-value text-warning" id="signalsRejected">-</div>
+                        <div class="metric-label">Sinais Rejeitados</div>
+                        <small class="text-muted">Não passou no filtro</small>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" /></svg>Signals Received:</label><strong id="signals-received" class="block text-3xl text-teal-400 mt-1">0</strong></div>
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Signals Approved:</label><strong id="signals-approved" class="block text-3xl text-green-400 mt-1">0</strong></div>
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>Signals Rejected:</label><strong id="signals-rejected" class="block text-3xl text-yellow-400 mt-1">0</strong></div>
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>Forwarded Success:</label><strong id="signals-forwarded-success" class="block text-3xl text-blue-400 mt-1">0</strong></div>
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>Forward Errors:</label><strong id="signals-forwarded-error" class="block text-3xl text-red-400 mt-1">0</strong></div>
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>Success Rate:</label><strong id="success-rate" class="block text-3xl text-purple-400 mt-1">N/A</strong></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card status-card text-center">
+                    <div class="card-body">
+                        <div class="metric-value text-info" id="signalsForwarded">-</div>
+                        <div class="metric-label">Sinais Encaminhados</div>
+                        <small class="text-muted">Enviados com sucesso</small>
                     </div>
-                </section>
-
-                <!-- Queue and Worker Status Section -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-                    <h3 class="text-xl font-semibold mb-4 text-teal-400 border-b border-slate-700 pb-3 flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" /><path stroke-linecap="round" stroke-linejoin="round" d="M8 5a2 2 0 012-2h4a2 2 0 012 2v3H8V5z" /></svg>
-                        Queue & Worker Status
-                    </h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>Processing Queue:</label><strong id="processing-queue-size" class="block text-3xl text-indigo-400 mt-1">0</strong></div>
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>Approved Queue:</label><strong id="approved-queue-size" class="block text-3xl text-cyan-400 mt-1">0</strong></div>
-                        <div class="metric-card p-4 rounded-md"><label class="text-sm font-medium text-slate-400 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>Active Forward Workers:</label><strong id="forwarding-workers-active" class="block text-3xl text-orange-400 mt-1">0</strong></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Queue Status and System Info -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-queue"></i> Status das Filas
+                        </h5>
                     </div>
-                </section>
-
-                <!-- Approved Tickers Column -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl flex flex-col">
-                    <h3 class="text-xl font-semibold mb-2 text-teal-400 border-b border-slate-700 pb-3 flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
-                        Approved Tickers
-                    </h3>
-                    <p class="text-sm text-slate-400 mb-4"><span id="ticker-count" class="font-bold text-teal-400">0</span> tickers currently in the approved list (Top-N from Finviz):</p>
-                    <div id="tickers-list-container" class="flex-grow bg-slate-700 p-4 rounded-md overflow-y-auto ticker-grid min-h-[200px]">
-                        <div class="bg-yellow-600 text-yellow-900 font-semibold text-center py-3 px-4 rounded-md shadow-md text-sm col-span-full flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.216 3.004-1.742 3.004H4.42c-1.526 0-2.492-1.67-1.742-3.004l5.58-9.92zM10 10a1 1 0 00-1 1v2a1 1 0 102 0v-2a1 1 0 00-1-1zm0 5a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" /></svg>
-                            No tickers available. Finviz may be temporarily blocking requests or none found.
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-6">
+                                <div class="metric-value text-primary" id="processingQueueSize">-</div>
+                                <div class="metric-label">Fila de Processamento</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="metric-value text-warning" id="approvedQueueSize">-</div>
+                                <div class="metric-label">Fila de Encaminhamento</div>
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="d-flex justify-content-between small">
+                                <span>Workers Ativos:</span>
+                                <span id="forwardingWorkersActive">-</span>
+                            </div>
+                            <div class="progress">
+                                <div id="workerProgress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
                         </div>
                     </div>
-                </section>
+                </div>
             </div>
-
-            <!-- Right Column: Configuration -->
-            <div class="lg:col-span-1 space-y-8">
-                <h2 class="text-2xl font-semibold text-white border-b border-slate-700 pb-3 flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mr-3 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    Configuration & Settings
-                </h2>
-                <!-- Current Configuration Display -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-                    <h3 class="text-xl font-semibold mb-4 text-teal-400 border-b border-slate-700 pb-3 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Current Setup</h3>
-                    <div class="space-y-3">
-                        <div class="config-item"><label class="text-xs font-medium text-slate-400">Finviz Screener URL:</label><div class="flex items-start gap-2"><strong id="finviz-url" class="flex-1 text-sm text-slate-200 break-all">N/A</strong><div class="flex gap-1 ml-2"><button id="copy-url-btn" class="bg-slate-600 hover:bg-slate-500 text-slate-300 text-xs px-2 py-1 rounded transition duration-150 ease-in-out flex items-center" title="Copy current URL to clipboard"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg></button><button id="autofill-url-btn" class="bg-slate-600 hover:bg-slate-500 text-slate-300 text-xs px-2 py-1 rounded transition duration-150 ease-in-out flex items-center" title="Auto-fill current URL in Update Data Source form"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg></button></div></div></div>
-                        <div class="config-item"><label class="text-xs font-medium text-slate-400">Top-N:</label><strong id="top-n" class="block text-sm text-slate-200">N/A</strong></div>
-                        <div class="config-item"><label class="text-xs font-medium text-slate-400">Refresh Interval (sec):</label><strong id="current-refresh-sec" class="block text-sm text-slate-200">N/A</strong></div>
-                        <div class="config-item"><label class="text-xs font-medium text-slate-400">Destination Webhook URL:</label><strong id="dest-webhook-url" class="block text-sm text-slate-200 break-all">N/A</strong></div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-info-circle"></i> Sistema
+                        </h5>
                     </div>
-                </section>
-
-                <!-- Update Configuration -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-                    <h3 class="text-xl font-semibold mb-4 text-teal-400 border-b border-slate-700 pb-3 flex items-center justify-between">
-                        <div class="flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4M4 7s0 0 0 0m16 0s0 0 0 0M12 12L4 7m8 5l8-5m-8 5v9" /></svg>
-                        Update Data Source</div>
-                        <button id="finviz-limits-info-btn" class="bg-slate-600 hover:bg-slate-500 text-slate-300 text-xs px-2 py-1 rounded-full transition duration-150 ease-in-out" title="Show Finviz rate limits information"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></button>
-                    </h3>
-                    <form id="config-form" class="space-y-4">
-                        <input type="text" id="new-finviz-url" name="new-finviz-url" placeholder="New Finviz Screener URL" required class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <input type="number" id="new-top-n" name="new-top-n" min="1" placeholder="New Top-N" required class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <input type="number" id="refresh-sec" name="refresh-sec" min="5" placeholder="Refresh Interval (seconds)" required class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <input type="password" id="update-token" name="update-token" placeholder="Admin Token" required class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-opacity-50">Update Data Source</button>
-                    </form>
-                    <div id="status-message-box" class="mt-3 p-3 rounded-md text-sm" style="display: none;"></div>
-                </section>
-
-                <!-- Update Destination Webhook -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-                    <h3 class="text-xl font-semibold mb-4 text-teal-400 border-b border-slate-700 pb-3 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>Update Destination Webhook</h3>
-                    <form id="webhook-form" class="space-y-4">
-                        <input type="url" id="new-webhook-url" name="new-webhook-url" placeholder="New Webhook URL (e.g. https://...)" required class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <input type="password" id="webhook-update-token" name="webhook-update-token" placeholder="Admin Token" required class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500 focus:outline-none">
-                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">Update Webhook URL</button>
-                    </form>
-                    <div id="webhook-status-message-box" class="mt-3 p-3 rounded-md text-sm" style="display: none;"></div>
-                </section>
-
-                <!-- Webhook Rate Limiter Control -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-                    <h3 class="text-xl font-semibold mb-4 text-purple-400 border-b border-slate-700 pb-3 flex items-center justify-between">
-                        <div class="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Webhook Rate Limiter
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6">
+                                <strong>Engine Status:</strong><br>
+                                <span id="engineStatus" class="badge badge-status">-</span>
+                            </div>
+                            <div class="col-6">
+                                <strong>Rate Limiter:</strong><br>
+                                <span id="rateLimiterStatus" class="badge badge-status">-</span>
+                            </div>
                         </div>
-                        <span id="webhook-rate-limiter-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-700 text-slate-300">Loading...</span>
-                    </h3>
-                    
-                    <!-- Current Status Info -->
-                    <div class="mb-4 p-4 bg-slate-700 rounded-lg">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-sm text-slate-300">Current Status:</span>
-                            <span id="webhook-status-indicator" class="px-2 py-1 text-xs rounded-full bg-gray-600 text-gray-300">Unknown</span>
-                        </div>
-                        <div class="text-xs text-slate-400">
-                            <span id="webhook-status-description">Rate limiter controls webhook sending rate to protect destination from overload</span>
+                        <hr>
+                        <div class="row">
+                            <div class="col-6">
+                                <strong>Tickers Top-N:</strong><br>
+                                <span id="tickerCount">-</span>
+                            </div>
+                            <div class="col-6">
+                                <strong>Uptime:</strong><br>
+                                <span id="uptime">-</span>
+                            </div>
                         </div>
                     </div>
-                    
-                    <!-- Metrics Grid -->
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                        <div class="bg-slate-700/50 p-3 rounded-lg text-center border border-slate-600">
-                            <div class="text-slate-400 text-xs mb-1">Available Tokens</div>
-                            <div id="webhook-tokens-available" class="text-2xl font-bold text-purple-400">-</div>
-                            <div class="text-xs text-slate-500 mt-1">Ready to send</div>
-                        </div>
-                        <div class="bg-slate-700/50 p-3 rounded-lg text-center border border-slate-600">
-                            <div class="text-slate-400 text-xs mb-1">Rate Limit</div>
-                            <div id="webhook-max-req-per-min" class="text-2xl font-bold text-blue-400">-</div>
-                            <div class="text-xs text-slate-500 mt-1">per minute</div>
-                        </div>
-                        <div class="bg-slate-700/50 p-3 rounded-lg text-center border border-slate-600">
-                            <div class="text-slate-400 text-xs mb-1">Sent (60s)</div>
-                            <div id="webhook-requests-this-minute" class="text-2xl font-bold text-green-400">-</div>
-                            <div class="text-xs text-slate-500 mt-1">last minute</div>
-                        </div>
-                        <div class="bg-slate-700/50 p-3 rounded-lg text-center border border-slate-600">
-                            <div class="text-slate-400 text-xs mb-1">Rate Limited</div>
-                            <div id="webhook-total-limited" class="text-2xl font-bold text-amber-400">-</div>
-                            <div class="text-xs text-slate-500 mt-1">total queued</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Charts Section -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-bar-chart"></i> Sinais por Hora
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="signalsChart"></canvas>
                         </div>
                     </div>
-
-                    <!-- Quick Controls -->
-                    <div class="mb-4">
-                        <div class="text-sm font-medium text-slate-300 mb-3">Quick Controls</div>
-                        <div class="flex flex-wrap gap-2">
-                            <button type="button" id="webhook-pause-btn" class="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                Disable
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-pie-chart"></i> Taxa de Aprovação
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="approvalChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Control Actions -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-gear"></i> Controles do Sistema
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="action-buttons">
+                            <button id="pauseEngineBtn" class="btn btn-warning">
+                                <i class="bi bi-pause"></i> Pausar Engine
                             </button>
-                            <button type="button" id="webhook-resume-btn" class="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-800 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6.5-5L12 9l3.5-4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                Enable
+                            <button id="resumeEngineBtn" class="btn btn-success">
+                                <i class="bi bi-play"></i> Retomar Engine
+                            </button>
+                            <button id="refreshEngineBtn" class="btn btn-info">
+                                <i class="bi bi-arrow-clockwise refresh-btn"></i> Atualizar Tickers
+                            </button>
+                            <button id="resetMetricsBtn" class="btn btn-secondary">
+                                <i class="bi bi-arrow-counterclockwise"></i> Resetar Métricas
+                            </button>
+                            <button id="pauseRateLimiterBtn" class="btn btn-warning">
+                                <i class="bi bi-pause"></i> Pausar Rate Limiter
+                            </button>
+                            <button id="resumeRateLimiterBtn" class="btn btn-success">
+                                <i class="bi bi-play"></i> Retomar Rate Limiter
                             </button>
                         </div>
                     </div>
-
-                    <!-- Advanced Configuration -->
-                    <details class="bg-slate-700/30 rounded-lg p-4">
-                        <summary class="cursor-pointer text-sm font-medium text-slate-300 hover:text-purple-400 transition-colors">
-                            Advanced Configuration
-                        </summary>
-                        <form id="webhook-rate-limiter-config-form" class="mt-4 space-y-4">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div>
-                                    <label for="webhook-new-max-req" class="block text-sm font-medium text-slate-300 mb-1">
-                                        Rate Limit (1-300 req/min)
-                                    </label>
-                                    <input type="number" id="webhook-new-max-req" name="webhook-new-max-req" min="1" max="300" 
-                                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-purple-500 focus:border-purple-500 focus:outline-none" 
-                                           placeholder="60">
-                                    <div class="text-xs text-slate-400 mt-1">Current rate limit setting</div>
-                                </div>
-                                <div>
-                                    <label for="webhook-rate-limiter-token" class="block text-sm font-medium text-slate-300 mb-1">
-                                        Admin Token
-                                    </label>
-                                    <input type="password" id="webhook-rate-limiter-token" name="webhook-rate-limiter-token" required 
-                                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-400 px-3 py-2 rounded-md text-sm focus:ring-purple-500 focus:border-purple-500 focus:outline-none" 
-                                           placeholder="Admin Token">
-                                    <div class="text-xs text-slate-400 mt-1">Required for configuration changes</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sell All Management -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-list-check"></i> Gerenciamento Sell All
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <h6>Tickers na Lista Sell All:</h6>
+                                <div id="sellAllTickers" class="mb-3">
+                                    <span class="text-muted">Carregando...</span>
                                 </div>
                             </div>
-                            <div class="flex items-center justify-between pt-2">
-                                <label class="flex items-center cursor-pointer">
-                                    <input type="checkbox" id="webhook-enabled-checkbox" class="sr-only">
-                                    <div class="relative">
-                                        <div class="block bg-slate-600 w-14 h-8 rounded-full"></div>
-                                        <div class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition"></div>
+                            <div class="col-md-4">
+                                <div class="d-grid gap-2">
+                                    <button id="executeSellAllBtn" class="btn btn-danger">
+                                        <i class="bi bi-exclamation-triangle"></i> Executar Sell All
+                                    </button>
+                                    <button id="refreshSellAllBtn" class="btn btn-outline-secondary">
+                                        <i class="bi bi-arrow-clockwise"></i> Atualizar Lista
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Audit Trail -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-journal-text"></i> Trilha de Auditoria
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Filters -->
+                        <div class="filter-card p-3 mb-3">
+                            <div class="row">
+                                <div class="col-md-2">
+                                    <label for="limitSelect" class="form-label">Limite:</label>
+                                    <select id="limitSelect" class="form-select form-select-sm">
+                                        <option value="100">100</option>
+                                        <option value="500">500</option>
+                                        <option value="1000">1000</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="statusFilter" class="form-label">Status:</label>
+                                    <select id="statusFilter" class="form-select form-select-sm">
+                                        <option value="">Todos</option>
+                                        <option value="RECEIVED">Recebido</option>
+                                        <option value="APPROVED">Aprovado</option>
+                                        <option value="REJECTED">Rejeitado</option>
+                                        <option value="FORWARDED_SUCCESS">Encaminhado</option>
+                                        <option value="FORWARDED_HTTP_ERROR">Erro HTTP</option>
+                                        <option value="ERROR">Erro</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="tickerFilter" class="form-label">Ticker:</label>
+                                    <input type="text" id="tickerFilter" class="form-control form-control-sm" placeholder="Ex: AAPL">
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="hourFilter" class="form-label">Últimas horas:</label>
+                                    <select id="hourFilter" class="form-select form-select-sm">
+                                        <option value="">Todas</option>
+                                        <option value="1">1 hora</option>
+                                        <option value="6">6 horas</option>
+                                        <option value="24">24 horas</option>
+                                        <option value="168">7 dias</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div class="d-grid">
+                                        <button id="applyFiltersBtn" class="btn btn-primary btn-sm">
+                                            <i class="bi bi-funnel"></i> Filtrar
+                                        </button>
                                     </div>
-                                    <div class="ml-3 text-slate-300 font-medium">Enable Rate Limiting</div>
-                                </label>
-                                <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50">
-                                    Apply Changes
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div class="d-grid">
+                                        <button id="clearFiltersBtn" class="btn btn-outline-secondary btn-sm">
+                                            <i class="bi bi-x-circle"></i> Limpar
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Audit Table -->
+                        <div class="table-responsive">
+                            <table class="table table-hover table-sm audit-table">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Signal ID</th>
+                                        <th>Ticker</th>
+                                        <th>Status</th>
+                                        <th>Localização</th>
+                                        <th>Worker</th>
+                                        <th>Detalhes</th>
+                                        <th>HTTP</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="auditTableBody">
+                                    <tr>
+                                        <td colspan="8" class="text-center">
+                                            <div class="loading-spinner spinner-border" role="status">
+                                                <span class="visually-hidden">Carregando...</span>
+                                            </div>
+                                            Carregando dados da auditoria...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <div class="text-muted">
+                                <span id="auditResultsInfo">-</span>
+                            </div>
+                            <div>
+                                <button id="prevPageBtn" class="btn btn-outline-secondary btn-sm me-2" disabled>
+                                    <i class="bi bi-chevron-left"></i> Anterior
+                                </button>
+                                <span id="pageInfo" class="mx-2">Página 1</span>
+                                <button id="nextPageBtn" class="btn btn-outline-secondary btn-sm ms-2" disabled>
+                                    Próxima <i class="bi bi-chevron-right"></i>
                                 </button>
                             </div>
-                        </form>
-                    </details>
-                    
-                    <div id="webhook-rate-limiter-status-message" class="mt-3 p-3 rounded-md text-sm" style="display: none;"></div>
-                </section>
-                
-                <!-- System Information -->
-                <section class="bg-slate-800 p-6 rounded-lg shadow-xl">
-                    <h3 class="text-xl font-semibold mb-4 text-teal-400 border-b border-slate-700 pb-3 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg>System Information</h3>
-                    <div class="space-y-2 text-sm">
-                        <div class="flex justify-between"><span class="text-slate-400">Finviz Elite Enabled:</span> <strong id="finviz-elite-enabled" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Elite Session Valid:</span> <strong id="auth-session-valid" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Max Requests/Min:</span> <strong id="max-requests-per-min" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Max Concurrency:</span> <strong id="max-concurrency" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Tickers Per Page:</span> <strong id="rows-per-page" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Rate Limit Tokens:</span> <strong id="rate-limit-tokens-live" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Concurrency Slots:</span> <strong id="concurrency-slots-available" class="text-slate-200">N/A</strong></div>
-                        <hr class="border-slate-700 my-3">
-                        <div class="text-slate-300 font-medium mb-2">Webhook Rate Limiter</div>
-                        <div class="flex justify-between"><span class="text-slate-400">Status:</span> <strong id="webhook-rl-status-live" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Webhook Tokens:</span> <strong id="webhook-rl-tokens-live" class="text-slate-200">N/A</strong></div>
-                        <div class="flex justify-between"><span class="text-slate-400">Webhook Max/Min:</span> <strong id="webhook-rl-max-live" class="text-slate-200">N/A</strong></div>
+                        </div>
                     </div>
-                </section>
+                </div>
             </div>
         </div>
-    </main>
-
-    <footer class="bg-slate-800 mt-auto">
-        <div class="container mx-auto px-6 py-4 text-center text-slate-500 text-sm">
-            © <span id="copyright-year"></span> Trading Signal Processor. All rights reserved.
-        </div>
-    </footer>
-
-    <!-- Finviz Limits Information Modal -->
-    <div id="finviz-limits-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" style="display:none;">
-      <div class="bg-slate-800 rounded-2xl p-6 max-w-3xl w-full mx-4 max-h-[90vh] shadow-2xl flex flex-col">
-        <div class="flex justify-between items-center border-b border-slate-600 pb-4 mb-4 flex-shrink-0">
-          <h3 class="text-xl sm:text-2xl font-semibold text-teal-400">Finviz Rate Limits & Guidelines</h3>
-          <button id="close-limits-modal" class="text-slate-400 hover:text-white" aria-label="Close modal" title="Close"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>
-        </div>
-        <div class="custom-scrollbar space-y-5 text-sm text-slate-300 pr-1 flex-grow">
-          <section class="bg-slate-700/80 p-4 rounded-lg">
-            <h4 class="text-lg text-teal-400 font-semibold mb-3 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Free Account</h4>
-            <div class="space-y-2">
-              <div class="flex justify-between items-center"><span>Requests per minute (approx.):</span><span class="text-yellow-400 font-mono text-base">≤ 60</span></div>
-              <div class="flex justify-between items-center"><span>Tickers per request (screener page):</span><span class="text-yellow-400 font-mono text-base">20</span></div>
-              <div class="text-xs text-slate-400 mt-3 pt-2 border-t border-slate-600/50"><strong class="text-slate-300">Refresh Examples (Free):</strong><ul class="list-disc list-inside mt-1 space-y-1 pl-1"><li><em>5s refresh:</em> 12 cycles/min ⇒ floor(60/12) = 5 pages ⇒ 5×20 = 100 tickers</li><li><em>15s refresh:</em> 4 cycles/min ⇒ floor(60/4) = 15 pages ⇒ 15×20 = 300 tickers</li></ul></div>
-            </div>
-          </section>
-          <section class="bg-slate-700/80 p-4 rounded-lg">
-            <h4 class="text-lg text-green-400 font-semibold mb-3 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>Elite Account</h4>
-            <div class="space-y-2">
-              <div class="flex justify-between items-center"><span>Requests per minute (approx.):</span><span class="text-green-400 font-mono text-base">≤ 120</span></div>
-              <div class="flex justify-between items-center"><span>Tickers per request (screener page):</span><span class="text-green-400 font-mono text-base">100</span></div>
-              <div class="text-xs text-slate-400 mt-3 pt-2 border-t border-slate-600/50"><strong class="text-slate-300">Refresh Examples (Elite):</strong><ul class="list-disc list-inside mt-1 space-y-1 pl-1"><li><em>5s refresh:</em> 12 cycles/min ⇒ floor(120/12) = 10 pages ⇒ 10×100 = 1,000 tickers</li><li><em>15s refresh:</em> 4 cycles/min ⇒ floor(120/4) = 30 pages ⇒ 30×100 = 3,000 tickers</li></ul></div>
-              <div class="text-xs text-slate-400 mt-3 space-y-2 pt-2 border-t border-slate-600/50"><p><strong class="text-slate-300">Important Note on Data Consistency:</strong> For multi-page fetches (e.g., Top 500), consider requesting slightly more data (e.g., 510) to compensate for rapid ranking changes during the fetching process and avoid missing tickers.</p></div>
-            </div>
-          </section>
-          <section class="bg-sky-900/70 p-4 rounded-lg border border-sky-700">
-            <h4 class="text-lg text-sky-400 font-semibold mb-3 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>General Guidelines</h4>
-            <ul class="text-xs space-y-1.5 text-slate-300 list-disc list-inside pl-1">
-              <li>Exceeding request limits may result in temporary IP blocks (HTTP 429 errors).</li>
-              <li>Elite account sessions may expire. Automated re-login might be needed for continuous operation.</li>
-              <li>Distribute requests evenly over time to avoid burst throttling.</li>
-            </ul>
-          </section>
-        </div>
-      </div>
     </div>
-
-    <!-- ###################################################### -->
-    <!-- #      INÍCIO DO SCRIPT JAVASCRIPT CORRIGIDO         # -->
-    <!-- ###################################################### -->
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
     <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        // --- 1. REFERÊNCIAS AOS ELEMENTOS DO DOM ---
-        // Pega todos os elementos uma vez para otimizar o desempenho.
-        const elements = {
-            // Overview & Status
-            overview: {
-                engineStatusDot: document.getElementById('overview-engine-status-dot'),
-                engineStatusText: document.getElementById('overview-engine-status-text'),
-                lastUpdateStatus: document.getElementById('overview-last-update-status'),
-                lastSuccessfulUpdate: document.getElementById('overview-last-successful-update'),
-                lastFailedUpdate: document.getElementById('overview-last-failed-update'),
-                lastUpdateDuration: document.getElementById('overview-last-update-duration'),
-                numTickers: document.getElementById('overview-num-tickers'),
-                websocketStatus: document.getElementById('overview-websocket-status'),
-                eliteAuthStatus: document.getElementById('overview-elite-auth-status'),
-            },
-            // Engine Controls
-            engineControls: {
-                pauseBtn: document.getElementById('pause-engine-btn'),
-                resumeBtn: document.getElementById('resume-engine-btn'),
-                manualRefreshBtn: document.getElementById('manual-refresh-btn'),
-                messageBox: document.getElementById('engine-control-message-box'),
-            },
-            // Metrics
-            metrics: {
-                signalsReceived: document.getElementById('signals-received'),
-                signalsApproved: document.getElementById('signals-approved'),
-                signalsRejected: document.getElementById('signals-rejected'),
-                forwardedSuccess: document.getElementById('signals-forwarded-success'),
-                forwardedError: document.getElementById('signals-forwarded-error'),
-                successRate: document.getElementById('success-rate'),
-                startTime: document.getElementById('metrics-start-time'),
-                resetBtn: document.getElementById('reset-metrics-btn'),
-            },
-            // Queue Status (corrigindo o nome da propriedade)
-            queueStatus: {
-                processingSize: document.getElementById('processing-queue-size'),
-                approvedSize: document.getElementById('approved-queue-size'),
-                activeWorkers: document.getElementById('forwarding-workers-active'),
-            },
-            // Ticker List
-            tickers: {
-                listContainer: document.getElementById('tickers-list-container'), // Corrigido nome da propriedade
-                count: document.getElementById('ticker-count'),
-            },
-            // Configuration Display (corrigindo o nome da propriedade)
-            config: {
-                currentFinvizUrl: document.getElementById('finviz-url'), // Corrigindo nome da propriedade
-                currentTopN: document.getElementById('top-n'), // Corrigindo nome da propriedade
-                currentRefreshSec: document.getElementById('current-refresh-sec'), // Corrigindo nome da propriedade
-                destWebhookUrl: document.getElementById('dest-webhook-url'), // Corrigindo nome da propriedade
-            },
-            // Configuration Forms
-            forms: {
-                configForm: document.getElementById('config-form'),
-                newFinvizUrl: document.getElementById('new-finviz-url'),
-                newTopN: document.getElementById('new-top-n'),
-                refreshSec: document.getElementById('refresh-sec'),
-                updateToken: document.getElementById('update-token'),
-                statusMessageBox: document.getElementById('status-message-box'),
-
-                webhookForm: document.getElementById('webhook-form'),
-                newWebhookUrl: document.getElementById('new-webhook-url'),
-                webhookUpdateToken: document.getElementById('webhook-update-token'),
-                webhookStatusMessageBox: document.getElementById('webhook-status-message-box'),
-            },
-            // URL Buttons
-            urlButtons: {
-                copy: document.getElementById('copy-url-btn'),
-                autofill: document.getElementById('autofill-url-btn'),
-            },
-            // Manual Order Execution
-            manualOrder: {
-                sellAllBtn: document.getElementById('sell-all-btn'),
-                clearAccumulatorBtn: document.getElementById('clear-accumulator-btn'),
-                sellAllList: document.getElementById('sell-all-list-container'), // Corrigindo nome da propriedade
-                statusMessage: document.getElementById('sell-order-status-message'),
-            },
-            // Audit Trail
-            audit: {
-                logContainer: document.getElementById('audit-log-container'),
-                emptyMessage: document.getElementById('audit-log-empty-message'),
-                searchTicker: document.getElementById('audit-search-ticker'),
-                statusFilter: document.getElementById('audit-status-filter'),
-                locationFilter: document.getElementById('audit-location-filter'),
-                filterStart: document.getElementById('audit-filter-start'),
-                filterEnd: document.getElementById('audit-filter-end'),
-                applyBtn: document.getElementById('apply-audit-filters-btn'),
-                clearBtn: document.getElementById('clear-audit-filters-btn'),
-            },
-            // Charts
-            charts: {
-                statusPie: document.getElementById('status-pie-chart'),
-                signalsOverTime: document.getElementById('signals-over-time-chart'),
-                timeInterval: document.getElementById('chart-time-interval'),
-                totalSignals: document.getElementById('chart-total-signals'),
-                approvedSignals: document.getElementById('chart-approved-signals'),
-                rejectedSignals: document.getElementById('chart-rejected-signals'),
-                approvalRate: document.getElementById('chart-approval-rate'),
-                timeSpan: document.getElementById('chart-time-span'),
-            },
-            // Webhook Rate Limiter
-            webhookRL: {
-                form: document.getElementById('webhook-rate-limiter-config-form'),
-                status: document.getElementById('webhook-rate-limiter-status'),
-                tokensAvailable: document.getElementById('webhook-tokens-available'),
-                currentMaxReq: document.getElementById('webhook-max-req-per-min'), // Corrigindo nome da propriedade
-                currentRequests: document.getElementById('webhook-requests-this-minute'), // Corrigindo nome da propriedade
-                totalLimited: document.getElementById('webhook-total-limited'),
-                statusMessage: document.getElementById('webhook-rate-limiter-status-message'),
-                pauseBtn: document.getElementById('webhook-pause-btn'),
-                resumeBtn: document.getElementById('webhook-resume-btn'),
-                newMaxReq: document.getElementById('webhook-new-max-req'),
-                token: document.getElementById('webhook-rate-limiter-token'),
-                enabledCheckbox: document.getElementById('webhook-enabled-checkbox'),
-            },
-            // System Info
-            system: {
-                finvizEliteEnabled: document.getElementById('finviz-elite-enabled'),
-                eliteSessionValid: document.getElementById('auth-session-valid'),
-                maxRequestsPerMin: document.getElementById('max-requests-per-min'),
-                maxConcurrency: document.getElementById('max-concurrency'),
-                tickersPerPage: document.getElementById('rows-per-page'),
-                rateLimitTokens: document.getElementById('rate-limit-tokens-live'),
-                concurrencySlots: document.getElementById('concurrency-slots-available'),
-                webhookRateLimiterStatus: document.getElementById('webhook-rl-status-live'),
-                webhookTokens: document.getElementById('webhook-rl-tokens-live'),
-                webhookMaxPerMin: document.getElementById('webhook-rl-max-live'),
-            },
-            // Modal
-            modal: {
-                element: document.getElementById('finviz-limits-modal'),
-                openBtn: document.getElementById('finviz-limits-info-btn'),
-                closeBtn: document.getElementById('close-limits-modal'),
-            },
-            // Footer
-            footer: {
-                copyrightYear: document.getElementById('copyright-year'),
-            }
-        };
-
-        // --- 2. ESTADO GLOBAL E VARIÁVEIS ---
-        let socket;
-        let statusPieChartInstance = null;
-        let signalsOverTimeChartInstance = null;
-        const originalCopyButtonContent = elements.urlButtons.copy.innerHTML;
+        // Global variables
+        let socket = null;
+        let signalsChart = null;
+        let approvalChart = null;
+        let currentPage = 1;
+        let isLoading = false;
         
-        // --- 3. INICIALIZAÇÃO DO WEBSOCKET ---
+        // Initialize the dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeWebSocket();
+            initializeCharts();
+            loadInitialData();
+            bindEventHandlers();
+            
+            // Auto-refresh audit trail every 30 seconds
+            setInterval(loadAuditTrail, 30000);
+        });
+          // WebSocket connection
         function initializeWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/admin-updates`;
             
-            console.log('Connecting to WebSocket:', wsUrl);
-            
             socket = new WebSocket(wsUrl);
             
             socket.onopen = function(event) {
+                updateConnectionStatus(true);
                 console.log('WebSocket connected');
-                updateWebSocketStatus('Connected', 'bg-green-600 text-green-100');
-                
-                // Solicitar dados de auditoria após conexão
-                setTimeout(() => {
-                    requestAuditLog();
-                }, 1000);
             };
             
             socket.onmessage = function(event) {
-                try {
-                    const message = JSON.parse(event.data);
-                    console.log('WebSocket message received:', message);
-                    handleWebSocketMessage(message);
-                } catch (error) {
-                    console.error('Error parsing WebSocket message:', error);
-                }
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
             };
             
             socket.onclose = function(event) {
-                console.log('WebSocket disconnected');
-                updateWebSocketStatus('Disconnected', 'bg-red-600 text-red-100');
-                // Reconectar após 5 segundos
+                updateConnectionStatus(false);
+                console.log('WebSocket disconnected, attempting to reconnect...');
+                // Attempt to reconnect every 5 seconds
                 setTimeout(initializeWebSocket, 5000);
             };
             
             socket.onerror = function(error) {
                 console.error('WebSocket error:', error);
-                updateWebSocketStatus('Error', 'bg-red-600 text-red-100');
+                updateConnectionStatus(false);
             };
         }
-        
-        function updateWebSocketStatus(status, className) {
-            if (elements.overview.websocketStatus) {
-                elements.overview.websocketStatus.textContent = status;
-                elements.overview.websocketStatus.className = `px-3 py-1 text-xs font-semibold rounded-full ${className}`;
-            }
-        }
-        
-        function handleWebSocketMessage(message) {
-            const { event, data } = message;
-            
-            switch (event) {
-                case 'initial_state':
-                    console.log('Received initial state:', data);
-                    updateInitialState(data);
-                    break;
+          // Handle WebSocket messages
+        function handleWebSocketMessage(data) {
+            switch(data.type) {
                 case 'metrics_update':
-                    console.log('Received metrics update:', data);
-                    updateMetrics(data);
-                    // Nota: Gráficos de auditoria são atualizados via new_audit_entry
+                    updateMetrics(data.data);
                     break;
-                case 'finviz_update_ok':
-                case 'finviz_update_failed':
-                    console.log('Received finviz status update:', event, data);
-                    updateFinvizStatus(event, data);
-                    break;
-                case 'finviz_status_update':
-                    console.log('Received finviz status update:', data);
-                    // Atualizar todas as seções com os dados do finviz
-                    updateOverview(data);
-                    updateConfigDisplay(data);
-                    updateSystemInfo(data);
-                    if (data.tickers) {
-                        updateTickerList(data.tickers);
+                case 'status_update':
+                    // Handle comprehensive status update
+                    if (data.data.metrics) {
+                        updateMetrics(data.data.metrics);
                     }
-                    if (data.signal_metrics) {
-                        updateMetrics(data.signal_metrics);
+                    if (data.data.system_info) {
+                        updateSystemStatus(data.data.system_info);
                     }
-                    break;
-                case 'system_info_update':
-                    console.log('Received system info update:', data);
-                    updateSystemInfo(data);
-                    break;
-                case 'webhook_rate_limiter_update':
-                    console.log('Received webhook rate limiter update:', data);
-                    updateWebhookRateLimiter(data);
-                    break;
-                case 'new_audit_entry':
-                    console.log('Received new audit entry:', data);
-                    addAuditEntry(data);
-                    // Atualizar gráficos após adicionar nova entrada
-                    updateChartsWithNewEntry(data);
+                    // Update charts if included
+                    if (data.data.metrics || data.data.system_info) {
+                        updateChartsWithData(data.data);
+                    }
                     break;
                 case 'sell_all_list_update':
-                    console.log('Received sell all list update:', data);
-                    updateSellAllList(data);
+                    updateSellAllList(data.data);
                     break;
-                case 'audit_log_data':
-                    console.log('Received audit log data:', data);
-                    if (window.loadAuditEntriesWithCharts) {
-                        window.loadAuditEntriesWithCharts(data.entries || []);
-                    } else {
-                        loadAuditEntries(data.entries || []);
+                case 'audit_update':
+                    // Optionally refresh audit trail on new events
+                    if (currentPage === 1) {
+                        loadAuditTrail();
                     }
                     break;
-                case 'pong':
-                    console.log('Received pong');
-                    break;
-                case 'overview_update':
-                    console.log('Received overview update:', data);
-                    updateOverview(data);
+                case 'metrics_reset':
+                    // Handle metrics reset
+                    updateMetrics(data.data);
+                    showAlert('Métricas foram resetadas com sucesso', 'info');
                     break;
                 default:
-                    console.log('Unknown WebSocket event:', event, data);
-                    // Para eventos desconhecidos, tentar atualizar todas as seções
-                    updateOverview(data);
-                    updateConfigDisplay(data);
-                    updateSystemInfo(data);
-                    if (data.tickers) {
-                        updateTickerList(data.tickers);
-                    }
-                    if (data.signal_metrics) {
-                        updateMetrics(data.signal_metrics);
-                    }
-                    if (data.webhook_rate_limiter) {
-                        updateWebhookRateLimiter(data.webhook_rate_limiter);
-                    }
-                    if (data.sell_all_accumulator !== undefined) {
-                        updateSellAllList(data.sell_all_accumulator);
-                    }
+                    console.log('Unknown WebSocket message type:', data.type);
             }
         }
         
-        const chartColors = {
-            total: '#38bdf8', // sky-400
-            approved: '#22c55e', // green-500
-            rejected: '#ef4444', // red-500
-            rate: '#8b5cf6', // violet-500
-            text: '#e2e8f0', // slate-200
-            grid: '#334155' // slate-700
-        };
-
-        // --- 4. INICIALIZAÇÃO ---
-        // Verificar se todos os elementos existem
-        console.log('=== CHECKING ELEMENTS ===');
-        Object.keys(elements).forEach(section => {
-            console.log(`Section: ${section}`);
-            Object.keys(elements[section]).forEach(key => {
-                const element = elements[section][key];
-                if (!element) {
-                    console.error(`Element not found: ${section}.${key}`);
-                } else {
-                    console.log(`✓ Found: ${section}.${key} (#${element.id})`);
-                }
-            });
-        });
-        console.log('=== ELEMENTS CHECK COMPLETE ===');
-        
-        // Inicializar WebSocket ao carregar a página
-        initializeWebSocket();
-        
-        // Inicializar gráficos de auditoria
-        initializeAuditCharts();
-        
-        // Carregar dados iniciais via HTTP caso o WebSocket não funcione
-        loadInitialDataFallback();
-        
-        // --- MANUAL ORDER EXECUTION EVENT LISTENERS ---
-        // Event listener para o botão "Sell All Tickers"
-        if (elements.manualOrder.sellAllBtn) {
-            elements.manualOrder.sellAllBtn.addEventListener('click', sellAllTickers);
-        }
-        
-        // Event listener para o botão "Clear List"
-        if (elements.manualOrder.clearAccumulatorBtn) {
-            elements.manualOrder.clearAccumulatorBtn.addEventListener('click', clearAccumulator);
-        }
-        
-        // --- URL BUTTONS EVENT LISTENERS ---
-        // Event listener para o botão "Copy URL"
-        if (elements.urlButtons.copy) {
-            elements.urlButtons.copy.addEventListener('click', copyCurrentUrl);
-        }
-        
-        // Event listener para o botão "Autofill URL"
-        if (elements.urlButtons.autofill) {
-            elements.urlButtons.autofill.addEventListener('click', autofillCurrentUrl);
-        }
-        
-        // --- CONFIGURATION FORMS EVENT LISTENERS ---
-        // Event listener para o formulário "Update Data Source"
-        if (elements.forms.configForm) {
-            elements.forms.configForm.addEventListener('submit', async function(e) {
-                e.preventDefault();
-                
-                const formData = {
-                    url: elements.forms.newFinvizUrl.value.trim(),
-                    top_n: parseInt(elements.forms.newTopN.value),
-                    refresh: parseInt(elements.forms.refreshSec.value),
-                    token: elements.forms.updateToken.value.trim()
-                };
-                
-                // Validação básica
-                if (!formData.url || !formData.top_n || !formData.refresh || !formData.token) {
-                    showStatusMessage(elements.forms.statusMessageBox, 'All fields are required', 'error');
-                    return;
-                }
-                
-                if (formData.top_n < 1) {
-                    showStatusMessage(elements.forms.statusMessageBox, 'Top-N must be at least 1', 'error');
-                    return;
-                }
-                
-                if (formData.refresh < 5) {
-                    showStatusMessage(elements.forms.statusMessageBox, 'Refresh interval must be at least 5 seconds', 'error');
-                    return;
-                }
-                
-                // Fazer a requisição
-                await performAdminAction(
-                    '/finviz/config',
-                    formData,
-                    'Data source configuration updated successfully!',
-                    elements.forms.statusMessageBox
-                );
-                
-                // Limpar campos após sucesso
-                elements.forms.newFinvizUrl.value = '';
-                elements.forms.newTopN.value = '';
-                elements.forms.refreshSec.value = '';
-                elements.forms.updateToken.value = '';
-            });
-        }
-        
-        // Event listener para o formulário "Update Destination Webhook"
-        if (elements.forms.webhookForm) {
-            elements.forms.webhookForm.addEventListener('submit', async function(e) {
-                e.preventDefault();
-                
-                const formData = {
-                    webhook_url: elements.forms.newWebhookUrl.value.trim(),
-                    token: elements.forms.webhookUpdateToken.value.trim()
-                };
-                
-                // Validação básica
-                if (!formData.webhook_url || !formData.token) {
-                    showStatusMessage(elements.forms.webhookStatusMessageBox, 'All fields are required', 'error');
-                    return;
-                }
-                
-                // Validação simples de URL
-                try {
-                    new URL(formData.webhook_url);
-                } catch (error) {
-                    showStatusMessage(elements.forms.webhookStatusMessageBox, 'Please enter a valid URL', 'error');
-                    return;
-                }
-                
-                // Fazer a requisição
-                await performAdminAction(
-                    '/admin/webhook/update',
-                    formData,
-                    'Webhook URL updated successfully!',
-                    elements.forms.webhookStatusMessageBox
-                );
-                
-                // Limpar campos após sucesso
-                elements.forms.newWebhookUrl.value = '';
-                elements.forms.webhookUpdateToken.value = '';
-            });
-        }
-        
-        // Event listener para o formulário "Webhook Rate Limiter Config"
-        if (elements.webhookRL.form) {
-            elements.webhookRL.form.addEventListener('submit', async function(e) {
-                e.preventDefault();
-                
-                const formData = {
-                    max_req_per_min: parseInt(elements.webhookRL.newMaxReq.value),
-                    enabled: elements.webhookRL.enabledCheckbox.checked,
-                    token: elements.webhookRL.token.value.trim()
-                };
-                
-                // Validação básica
-                if (!formData.token) {
-                    showStatusMessage(elements.webhookRL.statusMessage, 'Admin token is required', 'error');
-                    return;
-                }
-                
-                if (formData.max_req_per_min < 1 || formData.max_req_per_min > 300) {
-                    showStatusMessage(elements.webhookRL.statusMessage, 'Max requests per minute must be between 1 and 300', 'error');
-                    return;
-                }
-                
-                // Fazer a requisição - nota: este endpoint retorna 200 OK (não 204)
-                try {
-                    const response = await fetch('/admin/webhook-rate-limiter/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(formData),
-                    });
-                    const result = await response.json().catch(() => ({}));
-                    
-                    if (response.ok) {
-                        const message = result.message || 'Webhook rate limiter configuration updated successfully!';
-                        showStatusMessage(elements.webhookRL.statusMessage, message, 'success');
-                        
-                        // Limpar campos
-                        elements.webhookRL.newMaxReq.value = '';
-                        elements.webhookRL.token.value = '';
-                        
-                    } else {
-                        const errorDetail = result.detail || `Server responded with status ${response.status}`;
-                        showStatusMessage(elements.webhookRL.statusMessage, `Error: ${errorDetail}`, 'error');
-                    }
-                } catch (error) {
-                    showStatusMessage(elements.webhookRL.statusMessage, `Client-side Error: ${error.message}`, 'error');
-                    console.error('Error updating webhook rate limiter config:', error);
-                }
-            });
-        }
-        
-        // Event listeners para os botões Pause/Resume do webhook rate limiter
-        if (elements.webhookRL.pauseBtn) {
-            elements.webhookRL.pauseBtn.addEventListener('click', async function() {
-                const token = prompt('Enter admin token to pause webhook rate limiter:');
-                if (!token) return;
-                
-                await performAdminAction(
-                    '/admin/webhook-rate-limiter/pause',
-                    { token: token },
-                    'Webhook rate limiter paused successfully!',
-                    elements.webhookRL.statusMessage
-                );
-            });
-        }
-        
-        if (elements.webhookRL.resumeBtn) {
-            elements.webhookRL.resumeBtn.addEventListener('click', async function() {
-                const token = prompt('Enter admin token to resume webhook rate limiter:');
-                if (!token) return;
-                
-                await performAdminAction(
-                    '/admin/webhook-rate-limiter/resume',
-                    { token: token },
-                    'Webhook rate limiter resumed successfully!',
-                    elements.webhookRL.statusMessage
-                );
-            });
-        }
-        
-        // --- ENGINE CONTROL EVENT LISTENERS ---
-        // Event listener para o botão "Pause Engine"
-        if (elements.engineControls.pauseBtn) {
-            elements.engineControls.pauseBtn.addEventListener('click', async function() {
-                const token = prompt('Enter admin token to pause engine:');
-                if (!token) return;
-                
-                await performAdminAction(
-                    '/admin/engine/pause',
-                    { token: token },
-                    'Engine paused successfully!',
-                    elements.engineControls.messageBox
-                );
-            });
-        }
-        
-        // Event listener para o botão "Resume Engine"
-        if (elements.engineControls.resumeBtn) {
-            elements.engineControls.resumeBtn.addEventListener('click', async function() {
-                const token = prompt('Enter admin token to resume engine:');
-                if (!token) return;
-                
-                await performAdminAction(
-                    '/admin/engine/resume',
-                    { token: token },
-                    'Engine resumed successfully!',
-                    elements.engineControls.messageBox
-                );
-            });
-        }
-        
-        // Event listener para o botão "Manual Refresh"
-        if (elements.engineControls.manualRefreshBtn) {
-            elements.engineControls.manualRefreshBtn.addEventListener('click', async function() {
-                const token = prompt('Enter admin token to trigger manual refresh:');
-                if (!token) return;
-                
-                await performAdminAction(
-                    '/admin/engine/manual-refresh',
-                    { token: token },
-                    'Manual refresh triggered successfully!',
-                    elements.engineControls.messageBox
-                );
-            });
-        }
-        
-        // Event listener para o botão "Reset Metrics"
-        if (elements.metrics.resetBtn) {
-            elements.metrics.resetBtn.addEventListener('click', async function() {
-                const token = prompt('Enter admin token to reset metrics:');
-                if (!token) return;
-                
-                await performAdminAction(
-                    '/admin/metrics/reset',
-                    { token: token },
-                    'Metrics reset successfully!',
-                    elements.engineControls.messageBox
-                );
-            });
-        }
-        
-        // --- AUDIT TRAIL EVENT LISTENERS ---
-        // Event listener para o botão "Apply Filters"
-        if (elements.audit.applyBtn) {
-            elements.audit.applyBtn.addEventListener('click', applyAuditFilters);
-        }
-        
-        // Event listener para o botão "Clear Filters"
-        if (elements.audit.clearBtn) {
-            elements.audit.clearBtn.addEventListener('click', clearAuditFilters);
-        }
-        
-        // Event listener para busca por ticker (Enter key)
-        if (elements.audit.searchTicker) {
-            elements.audit.searchTicker.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    applyAuditFilters();
-                }
-            });
-        }
-        
-        // Event listeners para filtros de seleção (auto-aplicar)
-        if (elements.audit.statusFilter) {
-            elements.audit.statusFilter.addEventListener('change', applyAuditFilters);
-        }
-        
-        if (elements.audit.locationFilter) {
-            elements.audit.locationFilter.addEventListener('change', applyAuditFilters);
-        }
-        
-        if (elements.audit.filterStart) {
-            elements.audit.filterStart.addEventListener('change', applyAuditFilters);
-        }
-        
-        if (elements.audit.filterEnd) {
-            elements.audit.filterEnd.addEventListener('change', applyAuditFilters);
-        }
-        
-        // --- 5. FUNÇÕES AUXILIARES ---
-
-        /**
-         * Exibe uma mensagem de status (sucesso ou erro) em um elemento específico.
-         * @param {HTMLElement} element - O elemento da caixa de mensagem.
-         * @param {string} message - A mensagem a ser exibida.
-         * @param {'success'|'error'} type - O tipo de mensagem.
-         */
-        function showStatusMessage(element, message, type) {
-            if (!element) return;
-            element.textContent = message;
-            if (type === 'success') {
-                element.className = 'mt-3 p-3 rounded-md text-sm bg-green-700 text-green-100';
+        // Update connection status indicator
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('connectionIndicator');
+            const text = document.getElementById('connectionText');
+            const statusAlert = document.getElementById('connectionStatus');
+            
+            if (connected) {
+                indicator.className = 'status-indicator status-online';
+                text.textContent = 'Conectado';
+                statusAlert.style.display = 'none';
             } else {
-                element.className = 'mt-3 p-3 rounded-md text-sm bg-red-700 text-red-100';
-            }
-            element.style.display = 'block';
-            setTimeout(() => {
-                element.style.display = 'none';
-            }, 7000);
-        }
-
-        /**
-         * Realiza uma ação de administrador via fetch, lidando com a resposta e exibindo o status.
-         * @param {string} endpoint - O endpoint da API a ser chamado.
-         * @param {object} body - O corpo da requisição.
-         * @param {string} successMessage - Mensagem a ser exibida em caso de sucesso.
-         * @param {HTMLElement} statusMessageBox - O elemento para exibir a mensagem.
-         */
-        async function performAdminAction(endpoint, body, successMessage, statusMessageBox) {
-            try {
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
-                const result = await response.json().catch(() => ({})); // Evita erro se a resposta for vazia
-                
-                if (response.ok) {
-                    const message = result.message || successMessage;
-                    showStatusMessage(statusMessageBox, message, 'success');
-                } else {
-                    const errorDetail = result.detail || `Server responded with status ${response.status}`;
-                    showStatusMessage(statusMessageBox, `Error: ${errorDetail}`, 'error');
-                }
-            } catch (error) {
-                showStatusMessage(statusMessageBox, `Client-side Error: ${error.message}`, 'error');
-                console.error(`Error performing action on ${endpoint}:`, error);
+                indicator.className = 'status-indicator status-offline';
+                text.textContent = 'Desconectado';
+                statusAlert.style.display = 'block';
             }
         }
         
-        /**
-         * Atualiza um elemento de texto, se existir.
-         * @param {HTMLElement} element - O elemento a ser atualizado.
-         * @param {string|number} value - O novo valor.
-         * @param {string} [defaultValue='N/A'] - Valor padrão se o valor for nulo/indefinido.
-         */
-        function updateTextContent(element, value, defaultValue = 'N/A') {
-            if (!element) {
-                console.error('Element not found for update. Element is null/undefined:', element);
-                return;
-            }
-            const finalValue = value !== null && value !== undefined ? value : defaultValue;
-            element.textContent = finalValue;
-        }
-
-        /**
-         * Formata um timestamp para exibição legível
-         * @param {string} timestamp - Timestamp a ser formatado
-         * @returns {string} Timestamp formatado
-         */
-        function formatTimestamp(timestamp) {
-            if (!timestamp) return 'N/A';
+        // Initialize charts
+        function initializeCharts() {
+            // Signals per hour chart
+            const signalsCtx = document.getElementById('signalsChart').getContext('2d');
+            signalsChart = new Chart(signalsCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Sinais Recebidos',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
             
-            const date = new Date(timestamp);
-            return date.toLocaleString('pt-BR', {
-                timeZone: 'UTC',
-                hour12: false,
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            }).replace(',', ''); // Remove vírgula entre data e hora
-        }
-
-        /**
-         * Função para inicializar gráficos de auditoria
-         */
-        function initializeAuditCharts() {
-            console.log('Initializing audit charts...');
-            
-            // Verificar se os elementos dos gráficos existem
-            const statusPieChart = document.getElementById('status-pie-chart');
-            const signalsOverTimeChart = document.getElementById('signals-over-time-chart');
-            
-            if (!statusPieChart || !signalsOverTimeChart) {
-                console.warn('Chart elements not found, skipping chart initialization');
-                return;
-            }
-            
-            try {
-                // Gráfico de pizza - Status dos Sinais (atualizado para novo sistema)
-                const ctxStatus = statusPieChart.getContext('2d');
-                window.statusPieChartInstance = new Chart(ctxStatus, {
-                    type: 'pie',
-                    data: {
-                        labels: [
-                            'Successfully Forwarded',
-                            'Approved (Pending)',
-                            'Rejected',
-                            'HTTP Errors',
-                            'Timeout Errors',
-                            'Processing',
-                            'Discarded'
+            // Approval rate chart
+            const approvalCtx = document.getElementById('approvalChart').getContext('2d');
+            approvalChart = new Chart(approvalCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Aprovados', 'Rejeitados'],
+                    datasets: [{
+                        data: [0, 0],
+                        backgroundColor: [
+                            'rgba(40, 167, 69, 0.8)',
+                            'rgba(220, 53, 69, 0.8)'
                         ],
-                        datasets: [{
-                            data: [0, 0, 0, 0, 0, 0, 0],
-                            backgroundColor: [
-                                '#22c55e', // green-500 - Success
-                                '#3b82f6', // blue-500 - Approved pending
-                                '#ef4444', // red-500 - Rejected
-                                '#f97316', // orange-500 - HTTP errors
-                                '#eab308', // yellow-500 - Timeout errors
-                                '#8b5cf6', // purple-500 - Processing
-                                '#6b7280'  // gray-500 - Discarded
-                            ],
-                            borderColor: '#1e293b', // slate-800
-                            borderWidth: 2
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'bottom',
-                                labels: {
-                                    color: '#e2e8f0', // slate-200
-                                    font: {
-                                        size: 11
-                                    }
-                                }
-                            },
-                            tooltip: {
-                                callbacks: {
-                                    label: function(context) {
-                                        const label = context.label || '';
-                                        const value = context.parsed || 0;
-                                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                        const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-                                        return `${label}: ${value} (${percentage}%)`;
-                                    }
-                                }
-                            }
+                        borderColor: [
+                            'rgba(40, 167, 69, 1)',
+                            'rgba(220, 53, 69, 1)'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
                         }
                     }
-                });
-                
-                // Gráfico de linha - Sinais ao longo do tempo (atualizado)
-                const ctxSignals = signalsOverTimeChart.getContext('2d');
-                window.signalsOverTimeChartInstance = new Chart(ctxSignals, {
-                    type: 'line',
-                    data: {
-                        labels: [],
-                        datasets: [{
-                            label: 'Total Signals',
-                            data: [],
-                            borderColor: '#3b82f6', // blue-500
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            tension: 0.1,
-                            fill: false
-                        }, {
-                            label: 'Successfully Forwarded',
-                            data: [],
-                            borderColor: '#22c55e', // green-500
-                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                            tension: 0.1,
-                            fill: false
-                        }, {
-                            label: 'Rejected',
-                            data: [],
-                            borderColor: '#ef4444', // red-500
-                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                            tension: 0.1,
-                            fill: false
-                        }, {
-                            label: 'Errors (All Types)',
-                            data: [],
-                            borderColor: '#f97316', // orange-500
-                            backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                            tension: 0.1,
-                            fill: false
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: {
-                            intersect: false,
-                            mode: 'index'
-                        },
-                        scales: {
-                            x: {
-                                ticks: {
-                                    color: '#e2e8f0', // slate-200
-                                    maxTicksLimit: 10
-                                },
-                                grid: {
-                                    color: '#374151' // gray-700
-                                }
-                            },
-                            y: {
-                                beginAtZero: true,
-                                ticks: {
-                                    color: '#e2e8f0', // slate-200
-                                    stepSize: 1
-                                },
-                                grid: {
-                                    color: '#374151' // gray-700
-                                }
-                            }
-                        },
-                        plugins: {
-                            legend: {
-                                labels: {
-                                    color: '#e2e8f0' // slate-200
-                                }
-                            },
-                            tooltip: {
-                                backgroundColor: '#1e293b',
-                                titleColor: '#e2e8f0',
-                                bodyColor: '#e2e8f0',
-                                borderColor: '#374151',
-                                borderWidth: 1
-                            }
-                        }
-                    }
-                });
-                
-                console.log('Audit charts initialized successfully');
-                
-                // Initialize charts with current data if available
-                if (window.initializeChartsWithData) {
-                    window.initializeChartsWithData();
                 }
-            } catch (error) {
-                console.error('Error initializing audit charts:', error);
-            }
-        }
-
-        /**
-         * Solicita dados do log de auditoria via WebSocket
-         */
-        function requestAuditLog() {
-            console.log('Requesting audit log...');
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({
-                    event: 'request_audit_log',
-                    data: {}
-                }));
-            } else {
-                console.warn('WebSocket not connected, cannot request audit log');
-            }
-        }
-
-        /**
-         * Atualiza os gráficos com nova entrada de auditoria
-         * @param {object} entry - Nova entrada de auditoria
-         */
-        function updateChartsWithNewEntry(entry) {
-            if (!entry) return;
-            
-            console.log('Updating charts with new entry:', entry);
-            
-            // Use the new chart update function from admin-functions.js
-            if (window.updateChartsWithEntry) {
-                window.updateChartsWithEntry(entry);
-            }
-        }
-
-        /**
-         * Atualiza o status do engine
-         * @param {object} data - Dados do sistema
-         */
-        function updateEngineStatus(data) {
-            if (!data) return;
-            
-            console.log('Updating engine status with data:', data);
-            
-            // Atualizar status do engine na visão geral se disponível
-            if (data.engine_status && elements.overview.engineStatusText) {
-                updateTextContent(elements.overview.engineStatusText, data.engine_status);
-                
-                // Atualizar dot de status
-                if (elements.overview.engineStatusDot) {
-                    elements.overview.engineStatusDot.className = 'status-dot ' + 
-                        (data.engine_status === 'running' ? 'green' : 
-                         data.engine_status === 'paused' ? 'yellow' : 'red');
-                }
-            }
-        }
-
-        /**
-         * Exclui uma entrada de auditoria
-         * @param {HTMLElement} entryElement - Elemento da entrada de auditoria a ser excluída
-         */
-        function deleteAuditEntry(entryElement) {
-            if (!entryElement) return;
-            
-            console.log('Deleting audit entry:', entryElement);
-            entryElement.remove();
-            
-            // Reexibir mensagem vazia se não houver mais entradas
-            const container = elements.audit.logContainer;
-            const entries = container.querySelectorAll('.audit-entry');
-            if (entries.length === 0 && elements.audit.emptyMessage) {
-                elements.audit.emptyMessage.style.display = 'block';
-            }
-        }
-
-        /**
-         * Inicializa os eventos de contexto (menu de clique direito) para as entradas de auditoria
-         */
-        function initializeAuditEntryContextMenu() {
-            const container = elements.audit.logContainer;
-            if (!container) return;
-            
-            container.addEventListener('contextmenu', function(e) {
-                e.preventDefault();
-                
-                const entryElement = e.target.closest('.audit-entry');
-                if (!entryElement) return;
-                
-                // Remover menu anterior, se existir
-                const existingMenu = container.querySelector('.context-menu');
-                if (existingMenu) {
-                    existingMenu.remove();
-                }
-                
-                // Criar novo menu de contexto
-                const menu = document.createElement('div');
-                menu.className = 'context-menu absolute bg-slate-800 rounded-md shadow-lg p-2 z-50';
-                menu.style.top = `${e.clientY}px`;
-                menu.style.left = `${e.clientX}px`;
-                
-                // Adicionar opções de menu
-                const deleteOption = document.createElement('div');
-                deleteOption.className = 'context-menu-item text-sm text-red-400 cursor-pointer';
-                deleteOption.textContent = 'Delete Entry';
-                deleteOption.addEventListener('click', () => {
-                    const confirmed = confirm('Are you sure you want to delete this audit entry?');
-                    if (confirmed) {
-                        // Obter dados da entrada para enviar ao servidor, se necessário
-                        const entryData = entryElement.getAttribute('data-entry');
-                        console.log('Deleting entry:', entryData);
-                        
-                        // Chamar função para excluir no servidor via WebSocket
-                        if (socket && socket.readyState === WebSocket.OPEN) {
-                            socket.send(JSON.stringify({
-                                action: 'delete_audit_entry',
-                                entry: JSON.parse(entryData)
-                            }));
-                        }
-                        
-                        // Excluir entrada localmente
-                        deleteAuditEntry(entryElement);
-                    }
-                });
-                
-                menu.appendChild(deleteOption);
-                
-                // Adicionar menu ao container
-                container.appendChild(menu);
-                
-                // Remover menu ao clicar fora
-                function removeMenu() {
-                    menu.remove();
-                    container.removeEventListener('click', removeMenu);
-                }
-                container.addEventListener('click', removeMenu);
             });
         }
-
-        /**
-         * Inicializa a interface de auditoria
-         */
-        function initializeAuditInterface() {
-            // Carregar entradas de auditoria iniciais via WebSocket
-            requestAuditLog();
-            
-            // Inicializar eventos de contexto para entradas de auditoria
-            initializeAuditEntryContextMenu();
-        }
-
-        /**
-         * Formata um número para exibição com separador de milhar e duas casas decimais
-         * @param {number} value - O valor a ser formatado
-         * @returns {string} O valor formatado
-         */
-        function formatNumber(value) {
-            if (typeof value !== 'number') return '0.00';
-            return value.toLocaleString('pt-BR', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
-        }
-
-        /**
-         * Atualiza as métricas de auditoria na interface
-         * @param {object} data - Dados das métricas de auditoria
-         */
-        function updateAuditMetrics(data) {
-            if (!data) return;
-            
-            console.log('Updating audit metrics with data:', data);
-            
-            // Atualizar totais
-            updateTextContent(document.getElementById('chart-total-signals'), data.total_signals || 0);
-            updateTextContent(document.getElementById('chart-approved-signals'), data.approved_signals || 0);
-            updateTextContent(document.getElementById('chart-rejected-signals'), data.rejected_signals || 0);
-            updateTextContent(document.getElementById('chart-approval-rate'), data.approval_rate ? `${data.approval_rate}%` : '0%');
-            
-            // Atualizar gráficos
-            updateAuditCharts();
-        }
-
-        /**
-         * Atualiza a interface com os dados do estado inicial
-         * @param {object} data - Dados do estado inicial
-         */
-        function updateInitialState(data) {
-            console.log('=== UPDATING INITIAL STATE ===');
-            console.log('Data received:', data);
-            
-            if (!data) {
-                console.warn('No data provided to updateInitialState');
-                return;
-            }
-            
-            // Atualizar todas as seções com os dados recebidos
-            console.log('Calling updateOverview...');
-            updateOverview(data.overview || data);
-            
-            console.log('Calling updateConfigDisplay...');
-            updateConfigDisplay(data);
-            
-            console.log('Calling updateSystemInfo...');
-            updateSystemInfo(data);
-            
-            console.log('Calling updateWebhookRateLimiter...');
-            updateWebhookRateLimiter(data.webhook_rate_limiter || data);
-            
-            if (data.signal_metrics) {
-                console.log('Calling updateMetrics...');
-                updateMetrics(data.signal_metrics);
-            }
-            
-            if (data.tickers) {
-                console.log('Calling updateTickerList...');
-                updateTickerList(data.tickers);
-            }
-            
-            if (data.sell_all_accumulator) {
-                console.log('Calling updateSellAllList...');
-                updateSellAllList(data.sell_all_accumulator);
-            }
-            
-            // Atualizar status do engine
-            console.log('Calling updateEngineStatus...');
-            updateEngineStatus(data);
-            
-            // Atualizar entradas de auditoria
-            console.log('Calling loadAuditEntriesWithCharts...');
-            if (window.loadAuditEntriesWithCharts) {
-                window.loadAuditEntriesWithCharts(data.audit_log || []);
-            } else {
-                loadAuditEntries(data.audit_log || []);
-            }
-            
-            console.log('=== INITIAL STATE UPDATE COMPLETE ===');
-        }
-
-        /**
-         * Atualiza o status do Finviz na interface
-         * @param {string} event - Tipo de evento (finviz_update_ok ou finviz_update_failed)
-         * @param {object} data - Dados do status
-         */
-        function updateFinvizStatus(event, data) {
-            if (!data) return;
-            
-            console.log('Updating Finviz status:', event, data);
-            
-            // Atualizar status baseado no evento
-            if (event === 'finviz_update_ok') {
-                updateTextContent(elements.overview.lastUpdateStatus, 'Success');
-                if (elements.overview.lastUpdateStatus) {
-                    elements.overview.lastUpdateStatus.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-green-600 text-green-100';
-                }
-            } else if (event === 'finviz_update_failed') {
-                updateTextContent(elements.overview.lastUpdateStatus, 'Failed');
-                if (elements.overview.lastUpdateStatus) {
-                    elements.overview.lastUpdateStatus.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-red-600 text-red-100';
-                }
-            }
-            
-            // Atualizar timestamps se disponíveis
-            if (data.timestamp) {
-                if (event === 'finviz_update_ok') {
-                    updateTextContent(elements.overview.lastSuccessfulUpdate, formatTimestamp(data.timestamp));
-                } else {
-                    updateTextContent(elements.overview.lastFailedUpdate, formatTimestamp(data.timestamp));
-                }
-            }
-            
-            // Atualizar duração se disponível
-            if (data.duration) {
-                updateTextContent(elements.overview.lastUpdateDuration, `${data.duration}s`);
-            }
-        }
-
-        /**
-         * Função de fallback para carregar dados iniciais via HTTP
-         */
-        async function loadInitialDataFallback() {
+        
+        // Load initial data
+        async function loadInitialData() {
             try {
-                console.log('Loading initial data via HTTP fallback...');
-                const response = await fetch('/admin/status');
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('Initial data loaded:', data);
-                    
-                    // Mapear os dados do formato de /admin/status para o formato esperado
-                    const mappedData = {
-                        // System info - now includes all system_info data from backend
-                        engine_status: data.system?.status || 'unknown',
-                        dest_webhook_url: data.system?.dest_webhook_url || 'N/A',
-                        
-                        // System info fields (rate limiting, etc.)
-                        finviz_elite_enabled: data.system?.finviz_elite_enabled,
-                        auth_session_valid: data.system?.auth_session_valid,
-                        max_requests_per_min: data.system?.max_requests_per_min,
-                        max_concurrency: data.system?.max_concurrency,
-                        rows_per_page: data.system?.rows_per_page,
-                        rate_limit_tokens_available: data.system?.rate_limit_tokens_available,
-                        concurrency_slots_available: data.system?.concurrency_slots_available,
-                        webhook_rate_limiter_enabled: data.system?.webhook_rate_limiter_enabled,
-                        webhook_tokens_available: data.system?.webhook_tokens_available,
-                        webhook_max_requests_per_minute: data.system?.webhook_max_requests_per_minute,
-                        
-                        // Finviz data
-                        current_finviz_url: data.finviz?.current_finviz_url || 'N/A',
-                        current_top_n: data.finviz?.current_top_n || 0,
-                        current_refresh_sec: data.finviz?.current_refresh_sec || 0,
-                        tickers: data.finviz?.tickers || [],
-                        num_tickers: data.finviz?.tickers_count || 0,
-                        
-                        // Métricas
-                        signal_metrics: data.metrics || {},
-                        
-                        // Webhook rate limiter
-                        webhook_rate_limiter: data.webhook_rate_limiter || {},
-                        
-                        // Sell all accumulator
-                        sell_all_accumulator: data.sell_all_accumulator || []
-                    };
-                    
-                    updateInitialState(mappedData);
-                } else {
-                    console.error('Failed to load initial data:', response.status);
-                }
+                // Load status data
+                await loadSystemStatus();
+                
+                // Load sell all list
+                await loadSellAllList();
+                
+                // Load audit trail
+                await loadAuditTrail();
+                
             } catch (error) {
                 console.error('Error loading initial data:', error);
+                showAlert('Erro ao carregar dados iniciais', 'danger');
             }
         }
-    });
+        
+        // Load system status
+        async function loadSystemStatus() {
+            try {
+                const response = await fetch('/admin/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                
+                updateMetrics(data.metrics);
+                updateSystemStatus(data.system_info);
+                updateChartsWithData(data);
+                
+            } catch (error) {
+                console.error('Error loading system status:', error);
+                showAlert('Erro ao carregar status do sistema: ' + error.message, 'warning');
+            }
+        }
+        
+        // Update metrics display
+        function updateMetrics(metrics) {
+            if (!metrics) return;
+            
+            document.getElementById('signalsReceived').textContent = metrics.signals_received || 0;
+            document.getElementById('signalsApproved').textContent = metrics.signals_approved || 0;
+            document.getElementById('signalsRejected').textContent = metrics.signals_rejected || 0;
+            document.getElementById('signalsForwarded').textContent = metrics.signals_forwarded_success || 0;
+            document.getElementById('processingQueueSize').textContent = metrics.processing_queue_size || 0;
+            document.getElementById('approvedQueueSize').textContent = metrics.approved_queue_size || 0;
+            document.getElementById('forwardingWorkersActive').textContent = metrics.forwarding_workers_active || 0;
+            
+            // Update worker progress bar
+            const maxWorkers = 10; // Assuming max 10 workers
+            const activeWorkers = metrics.forwarding_workers_active || 0;
+            const progressPercent = (activeWorkers / maxWorkers) * 100;
+            document.getElementById('workerProgress').style.width = `${progressPercent}%`;
+              // Update approval chart with real data
+            if (approvalChart) {
+                const approved = metrics.signals_approved || 0;
+                const rejected = metrics.signals_rejected || 0;
+                const total = approved + rejected;
+                
+                approvalChart.data.datasets[0].data = [approved, rejected];
+                approvalChart.update();
+                
+                // Add data source note
+                const approvalContainer = document.querySelector('#approvalChart').parentElement;
+                let approvalNote = approvalContainer.querySelector('.approval-data-note');
+                if (!approvalNote) {
+                    approvalNote = document.createElement('small');
+                    approvalNote.className = 'approval-data-note text-muted d-block mt-2';
+                    approvalContainer.appendChild(approvalNote);
+                }
+                
+                if (total > 0) {
+                    const approvalRate = ((approved / total) * 100).toFixed(1);
+                    approvalNote.textContent = `📊 Taxa de aprovação: ${approvalRate}% (${approved}/${total})`;
+                    approvalNote.className = 'approval-data-note text-success d-block mt-2';
+                } else {
+                    approvalNote.textContent = '📊 Aguardando dados de sinais...';
+                    approvalNote.className = 'approval-data-note text-muted d-block mt-2';
+                }
+            }
+        }
+        
+        // Update system status
+        function updateSystemStatus(systemInfo) {
+            if (!systemInfo) return;
+            
+            // Engine status
+            const engineStatus = document.getElementById('engineStatus');
+            const enginePaused = systemInfo.finviz_engine_paused || false;
+            if (enginePaused) {
+                engineStatus.textContent = 'Pausado';
+                engineStatus.className = 'badge badge-status bg-warning';
+            } else {
+                engineStatus.textContent = 'Ativo';
+                engineStatus.className = 'badge badge-status bg-success';
+            }
+            
+            // Rate limiter status
+            const rateLimiterStatus = document.getElementById('rateLimiterStatus');
+            const rlPaused = systemInfo.webhook_rate_limiter_paused || false;
+            if (rlPaused) {
+                rateLimiterStatus.textContent = 'Pausado';
+                rateLimiterStatus.className = 'badge badge-status bg-warning';
+            } else {
+                rateLimiterStatus.textContent = 'Ativo';
+                rateLimiterStatus.className = 'badge badge-status bg-success';
+            }
+            
+            // Ticker count
+            const tickerCount = systemInfo.finviz_ticker_count || 0;
+            document.getElementById('tickerCount').textContent = tickerCount;
+            
+            // Uptime
+            if (systemInfo.uptime_seconds) {
+                const uptime = formatUptime(systemInfo.uptime_seconds);
+                document.getElementById('uptime').textContent = uptime;
+            }
+        }        // Update charts with historical data
+        async function updateChartsWithData(data) {
+            // Try to get real historical data from the new endpoint
+            try {
+                const historyResponse = await fetch('/admin/signals-history?hours=24');
+                if (!historyResponse.ok) {
+                    throw new Error(`HTTP ${historyResponse.status}: ${historyResponse.statusText}`);
+                }
+                const historyData = await historyResponse.json();
+                
+                if (historyData.data && historyData.data.length > 0) {
+                    // Use real historical data
+                    const labels = historyData.data.map(item => item.hour);
+                    const signalData = historyData.data.map(item => item.signals_received);
+                    
+                    if (signalsChart) {
+                        signalsChart.data.labels = labels;
+                        signalsChart.data.datasets[0].data = signalData;
+                        signalsChart.update();
+                    }
+                    
+                    // Add note about data source
+                    const chartContainer = document.querySelector('#signalsChart').parentElement;
+                    let sourceNote = chartContainer.querySelector('.data-source-note');
+                    if (!sourceNote) {
+                        sourceNote = document.createElement('small');
+                        sourceNote.className = 'data-source-note text-muted d-block mt-2';
+                        chartContainer.appendChild(sourceNote);
+                    }
+                    
+                    if (historyData.source === 'database') {
+                        sourceNote.textContent = '📊 Dados reais do PostgreSQL';
+                        sourceNote.className = 'data-source-note text-success d-block mt-2';
+                    } else if (historyData.source === 'calculated') {
+                        sourceNote.textContent = '📈 Dados estimados baseados nas métricas atuais';
+                        sourceNote.className = 'data-source-note text-warning d-block mt-2';
+                    }
+                    
+                    return; // Success - exit early
+                }
+            } catch (error) {
+                console.warn('Failed to load historical data:', error);
+                showAlert('Aviso: Dados históricos indisponíveis - ' + error.message, 'warning');
+            }
+            
+            // Fallback to basic calculation if endpoint fails
+            if (signalsChart && data.metrics) {
+                // Generate hourly labels for the last 24 hours
+                const now = new Date();
+                const labels = [];
+                const signalData = [];
+                
+                // Get current metrics for reference
+                const totalSignals = data.metrics.signals_received || 0;
+                const hoursOfUptime = data.system_info && data.system_info.uptime_seconds ? 
+                    Math.min(24, data.system_info.uptime_seconds / 3600) : 0;
+                
+                // Generate basic fallback data
+                for (let i = 23; i >= 0; i--) {
+                    const hour = new Date(now.getTime() - (i * 60 * 60 * 1000));
+                    labels.push(hour.getHours() + ':00');
+                    
+                    if (i >= (24 - hoursOfUptime)) {
+                        // System was running during this hour
+                        const hourlyAverage = hoursOfUptime > 0 ? totalSignals / hoursOfUptime : 0;
+                        signalData.push(Math.max(0, Math.floor(hourlyAverage + (Math.random() - 0.5) * hourlyAverage * 0.3)));
+                    } else {
+                        // System wasn't running - no signals
+                        signalData.push(0);
+                    }
+                }
+                
+                signalsChart.data.labels = labels;
+                signalsChart.data.datasets[0].data = signalData;
+                signalsChart.update();
+                
+                // Add fallback note
+                const chartContainer = document.querySelector('#signalsChart').parentElement;
+                let sourceNote = chartContainer.querySelector('.data-source-note');
+                if (!sourceNote) {
+                    sourceNote = document.createElement('small');
+                    sourceNote.className = 'data-source-note text-muted d-block mt-2';
+                    chartContainer.appendChild(sourceNote);
+                }
+                sourceNote.textContent = '⚠️ Dados básicos de fallback (histórico indisponível)';
+                sourceNote.className = 'data-source-note text-muted d-block mt-2';
+            }
+        }
+        
+        // Load sell all list
+        async function loadSellAllList() {
+            try {
+                const response = await fetch('/admin/sell-all-queue');
+                const data = await response.json();
+                updateSellAllList(data);
+            } catch (error) {
+                console.error('Error loading sell all list:', error);
+            }
+        }
+        
+        // Update sell all list display
+        function updateSellAllList(data) {
+            const container = document.getElementById('sellAllTickers');
+            
+            if (!data || !data.tickers || data.tickers.length === 0) {
+                container.innerHTML = '<span class="text-muted">Nenhum ticker na lista</span>';
+                return;
+            }
+            
+            const tickersHtml = data.tickers.map(ticker => 
+                `<span class="sell-all-ticker">${ticker}</span>`
+            ).join('');
+            
+            container.innerHTML = tickersHtml;
+        }
+        
+        // Load audit trail
+        async function loadAuditTrail() {
+            if (isLoading) return;
+            
+            isLoading = true;
+            const tbody = document.getElementById('auditTableBody');
+            const spinner = tbody.querySelector('.loading-spinner');
+            
+            if (spinner) {
+                spinner.style.display = 'inline-block';
+            }
+            
+            try {
+                const params = new URLSearchParams();
+                
+                // Get filter values
+                const limit = document.getElementById('limitSelect').value;
+                const status = document.getElementById('statusFilter').value;
+                const ticker = document.getElementById('tickerFilter').value;
+                const hours = document.getElementById('hourFilter').value;
+                
+                params.append('limit', limit);
+                params.append('offset', (currentPage - 1) * parseInt(limit));
+                
+                if (status) params.append('status_filter', status);
+                if (ticker) params.append('ticker', ticker);
+                if (hours) params.append('hours', hours);
+                
+                const response = await fetch(`/admin/audit-trail?${params}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                
+                displayAuditTrail(data);
+                updatePagination(data);
+                
+            } catch (error) {
+                console.error('Error loading audit trail:', error);
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">Erro ao carregar dados da auditoria: ' + error.message + '</td></tr>';
+                showAlert('Erro ao carregar auditoria: ' + error.message, 'danger');
+            } finally {
+                isLoading = false;
+            }
+        }
+        
+        // Display audit trail data
+        function displayAuditTrail(data) {
+            const tbody = document.getElementById('auditTableBody');
+            
+            if (!data.events || data.events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Nenhum evento encontrado</td></tr>';
+                return;
+            }
+            
+            const rows = data.events.map(event => {
+                const timestamp = new Date(event.timestamp).toLocaleString('pt-BR');
+                const statusBadge = getStatusBadge(event.event_type);
+                const locationBadge = getLocationBadge(event.location);
+                const httpStatus = event.http_status || '-';
+                const details = event.details || '-';
+                const workerId = event.worker_id || '-';
+                
+                return `
+                    <tr>
+                        <td>${timestamp}</td>
+                        <td><code>${event.signal_id.substring(0, 8)}...</code></td>
+                        <td><strong>${event.ticker || '-'}</strong></td>
+                        <td>${statusBadge}</td>
+                        <td>${locationBadge}</td>
+                        <td><small>${workerId}</small></td>
+                        <td><small>${details}</small></td>
+                        <td>${httpStatus}</td>
+                    </tr>
+                `;
+            }).join('');
+            
+            tbody.innerHTML = rows;
+        }
+        
+        // Get status badge HTML
+        function getStatusBadge(status) {
+            const statusColors = {
+                'RECEIVED': 'bg-info',
+                'APPROVED': 'bg-success',
+                'REJECTED': 'bg-warning',
+                'FORWARDED_SUCCESS': 'bg-success',
+                'FORWARDED_HTTP_ERROR': 'bg-danger',
+                'FORWARDED_GENERIC_ERROR': 'bg-danger',
+                'ERROR': 'bg-danger',
+                'PROCESSING': 'bg-primary',
+                'FORWARDING': 'bg-info'
+            };
+            
+            const color = statusColors[status] || 'bg-secondary';
+            return `<span class="badge ${color}">${status}</span>`;
+        }
+        
+        // Get location badge HTML
+        function getLocationBadge(location) {
+            const locationColors = {
+                'PROCESSING_QUEUE': 'bg-primary',
+                'APPROVED_QUEUE': 'bg-warning',
+                'WORKER_PROCESSING': 'bg-info',
+                'WORKER_FORWARDING': 'bg-info',
+                'COMPLETED': 'bg-success',
+                'DISCARDED': 'bg-secondary'
+            };
+            
+            const color = locationColors[location] || 'bg-secondary';
+            return `<span class="badge ${color}">${location}</span>`;
+        }
+        
+        // Update pagination controls
+        function updatePagination(data) {
+            const resultsInfo = document.getElementById('auditResultsInfo');
+            const pageInfo = document.getElementById('pageInfo');
+            const prevBtn = document.getElementById('prevPageBtn');
+            const nextBtn = document.getElementById('nextPageBtn');
+            
+            const limit = parseInt(document.getElementById('limitSelect').value);
+            const total = data.total || 0;
+            const hasMore = data.has_more || false;
+            
+            resultsInfo.textContent = `Exibindo ${data.events?.length || 0} de ${total} eventos`;
+            pageInfo.textContent = `Página ${currentPage}`;
+            
+            prevBtn.disabled = currentPage === 1;
+            nextBtn.disabled = !hasMore;
+        }
+        
+        // Bind event handlers
+        function bindEventHandlers() {
+            // Control buttons
+            document.getElementById('pauseEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/pause', 'Engine pausado'));
+            document.getElementById('resumeEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/resume', 'Engine retomado'));
+            document.getElementById('refreshEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/manual-refresh', 'Atualização de tickers iniciada'));
+            document.getElementById('resetMetricsBtn').addEventListener('click', () => sendControlCommand('/admin/metrics/reset', 'Métricas resetadas'));
+            document.getElementById('pauseRateLimiterBtn').addEventListener('click', () => sendControlCommand('/admin/webhook-rate-limiter/pause', 'Rate Limiter pausado'));
+            document.getElementById('resumeRateLimiterBtn').addEventListener('click', () => sendControlCommand('/admin/webhook-rate-limiter/resume', 'Rate Limiter retomado'));
+            
+            // Sell all buttons
+            document.getElementById('executeSellAllBtn').addEventListener('click', executeSellAll);
+            document.getElementById('refreshSellAllBtn').addEventListener('click', loadSellAllList);
+            
+            // Audit trail controls
+            document.getElementById('applyFiltersBtn').addEventListener('click', () => {
+                currentPage = 1;
+                loadAuditTrail();
+            });
+            document.getElementById('clearFiltersBtn').addEventListener('click', clearFilters);
+            document.getElementById('prevPageBtn').addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadAuditTrail();
+                }
+            });
+            document.getElementById('nextPageBtn').addEventListener('click', () => {
+                currentPage++;
+                loadAuditTrail();
+            });
+        }
+        
+        // Send control command
+        async function sendControlCommand(endpoint, successMessage) {
+            try {
+                // Get admin token if needed
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Digite o token de administrador:');
+                    if (!token) {
+                        showAlert('Token necessário para executar comandos administrativos', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+
+                const response = await fetch(endpoint, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ token: token })
+                });
+                
+                if (response.ok) {
+                    showAlert(successMessage, 'success');
+                    // Refresh status after a short delay
+                    setTimeout(loadSystemStatus, 1000);
+                } else if (response.status === 403) {
+                    // Clear invalid token
+                    localStorage.removeItem('admin_token');
+                    showAlert('Token inválido. Tente novamente.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error(`Error sending command to ${endpoint}:`, error);
+                showAlert(`Erro ao executar comando: ${error.message}`, 'danger');
+            }
+        }
+        
+        // Execute sell all
+        async function executeSellAll() {
+            if (!confirm('Tem certeza que deseja executar SELL ALL? Esta ação irá vender todas as posições na lista.')) {
+                return;
+            }
+            
+            try {
+                // Get admin token
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Digite o token de administrador:');
+                    if (!token) {
+                        showAlert('Token necessário para executar SELL ALL', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+
+                const response = await fetch('/admin/order/sell-all', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showAlert(`Sell All executado com sucesso! ${data.signals_sent || data.processed_tickers || 'N/A'} sinais enviados.`, 'success');
+                    loadSellAllList();
+                } else if (response.status === 403) {
+                    localStorage.removeItem('admin_token');
+                    showAlert('Token inválido. Tente novamente.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error executing sell all:', error);
+                showAlert(`Erro ao executar Sell All: ${error.message}`, 'danger');
+            }
+        }
+        
+        // Clear filters
+        function clearFilters() {
+            document.getElementById('statusFilter').value = '';
+            document.getElementById('tickerFilter').value = '';
+            document.getElementById('hourFilter').value = '';
+            currentPage = 1;
+            loadAuditTrail();
+        }
+        
+        // Show alert
+        function showAlert(message, type) {
+            const container = document.getElementById('alertContainer');
+            const alertId = 'alert-' + Date.now();
+            
+            const alertHtml = `
+                <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            
+            container.insertAdjacentHTML('beforeend', alertHtml);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                const alert = document.getElementById(alertId);
+                if (alert) {
+                    const bsAlert = new bootstrap.Alert(alert);
+                    bsAlert.close();
+                }
+            }, 5000);
+        }
+        
+        // Format uptime
+        function formatUptime(seconds) {
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            
+            if (days > 0) {
+                return `${days}d ${hours}h ${minutes}m`;
+            } else if (hours > 0) {
+                return `${hours}h ${minutes}m`;
+            } else {
+                return `${minutes}m`;
+            }
+        }
     </script>
-    
-    <!-- Include admin functions module -->
-    <script src="/static/js/admin-functions.js"></script>
 </body>
 </html>

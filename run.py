@@ -157,10 +157,9 @@ def check_database_configuration() -> bool:
     if not env_file.exists():
         print_error("Arquivo .env não encontrado")
         return False
-    
-    # Lê variáveis do .env
+      # Lê variáveis do .env
     env_vars = {}
-    with open(env_file, 'r') as f:
+    with open(env_file, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
@@ -234,7 +233,7 @@ def create_env_file_if_missing() -> None:
         
         if env_example.exists():
             # Copia .env.example para .env
-            with open(env_example, 'r') as src, open(env_file, 'w') as dst:
+            with open(env_example, 'r', encoding='utf-8') as src, open(env_file, 'w', encoding='utf-8') as dst:
                 content = src.read()
                 dst.write(content)
             print_success("Arquivo .env criado baseado em .env.example")
@@ -348,7 +347,7 @@ PROMETHEUS_PORT=8008
 # Habilita servidor Prometheus (não implementado ainda)
 # ENABLE_PROMETHEUS=false
 """
-            with open(env_file, 'w') as f:
+            with open(env_file, 'w', encoding='utf-8') as f:
                 f.write(basic_env)
             print_success("Arquivo .env completo criado")
             print_warning("⚠️  IMPORTANTE: Configure as variáveis obrigatórias no arquivo .env!")

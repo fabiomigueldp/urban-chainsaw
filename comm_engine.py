@@ -116,7 +116,7 @@ class CommunicationEngine:
         )
 
         message = {
-            "event": "audit_log_data",
+            "type": "audit_log_data",
             "data": {
                 "entries": entries[:100],  # Send last 100 entries
                 "total_count": len(entries),
@@ -139,7 +139,7 @@ class CommunicationEngine:
             _logger.debug(f"No active admin connections for broadcast: {event_type}")
             return 0, 0
 
-        message = {"event": event_type, "data": data}
+        message = {"type": event_type, "data": data}
         self.metrics.total_broadcasts += 1
         self.metrics.last_broadcast_time = time.time()
 
@@ -301,66 +301,27 @@ class CommunicationEngine:
         """Trigger new audit entry broadcast."""
         await self.broadcast_new_audit_entry(audit_entry)
 
+    # === NEW REQUIRED METHODS FOR ADMIN INTERFACE ===
+
+    async def trigger_metrics_update(self, metrics: Dict[str, Any]):
+        """Trigger metrics update broadcast for admin interface."""
+        await self.broadcast("metrics_update", metrics)
+
+    async def trigger_status_update(self, status_data: Dict[str, Any]):
+        """Trigger comprehensive status update broadcast for admin interface."""
+        await self.broadcast("status_update", status_data)
+
+    async def trigger_audit_update(self, audit_events: List[Dict[str, Any]]):
+        """Trigger audit update broadcast for admin interface."""
+        await self.broadcast("audit_update", audit_events)
+
+    def get_connected_clients(self) -> List[Any]:
+        """Get list of connected WebSocket clients."""
+        return list(self.active_connections)
+
+    async def trigger_sell_all_list_update(self, data: Dict[str, Any]):
+        """Trigger sell all list update broadcast."""
+        await self.broadcast("sell_all_list_update", data)
 
 # Global instance - following the shared_state pattern
 comm_engine = CommunicationEngine()
-
-# Exemplo de como usar (apenas para demonstração)
-async def main_example():
-    # Simula um cliente WebSocket fake para teste
-    class FakeWebSocket:
-        def __init__(self, client_id):
-            self.client = client_id
-            self.sent_messages = []
-
-        async def send_json(self, data):
-            print(f"[{self.client}] Recebeu: {json.dumps(data, indent=2)}")
-            self.sent_messages.append(data)
-            await asyncio.sleep(0.01) # simula latência de rede
-
-    print("--- Testando Communication Engine ---")
-
-    # Criando clientes falsos
-    ws1 = FakeWebSocket("Client-1")
-    ws2 = FakeWebSocket("Client-2")
-
-    # Adicionando conexões
-    await comm_engine.add_connection(ws1)
-    await comm_engine.add_connection(ws2)
-
-    # Enviando uma atualização de sistema
-    sys_info = {"cpu_load": 0.75, "memory_usage": "4.2GB"}
-    print("\n[BROADCAST] Enviando atualização de System Info...")
-    await comm_engine.trigger_system_info_update(data=sys_info)
-
-    # Enviando uma nova entrada de auditoria
-    audit_entry = {
-        "signal_id": f"sig_{int(time.time())}",
-        "ticker": "AAPL",
-        "status": "received",
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }
-    print("\n[BROADCAST] Enviando nova entrada de Auditoria...")
-    await comm_engine.trigger_new_audit_entry(audit_entry=audit_entry)
-    
-    # Criando um terceiro cliente para testar o envio do cache
-    print("\n[CONNECT] Novo cliente se conectando, deve receber o cache de auditoria...")
-    ws3 = FakeWebSocket("Client-3")
-    await comm_engine.add_connection(ws3) # O cache será enviado aqui
-
-    # Removendo uma conexão
-    print("\n[DISCONNECT] Removendo Client-1...")
-    await comm_engine.remove_connection(ws1)
-
-    # Enviando outra atualização, ws1 não deve receber
-    print("\n[BROADCAST] Enviando atualização de Fila...")
-    queue_status = {"processing_queue": 5, "forwarding_queue": 2}
-    await comm_engine.trigger_queue_status_update(data=queue_status)
-
-    print("\n--- Fim do Teste ---")
-    print(f"Métricas Finais: {comm_engine.metrics}")
-
-
-if __name__ == "__main__":
-    # Para rodar o exemplo, você pode executar este arquivo diretamente
-    asyncio.run(main_example())
