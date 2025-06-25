@@ -329,7 +329,7 @@
         
         <!-- Control Actions -->
         <div class="row mb-4">
-            <div class="col-12">
+            <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
@@ -357,6 +357,147 @@
                                 <i class="bi bi-play"></i> Retomar Rate Limiter
                             </button>
                         </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-gear-fill"></i> Configurações
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <button id="openConfigBtn" class="btn btn-primary w-100 mb-2">
+                            <i class="bi bi-sliders"></i> Abrir Painel de Configurações
+                        </button>
+                        <button id="setTokenBtn" class="btn btn-outline-secondary w-100">
+                            <i class="bi bi-key"></i> Configurar Token Admin
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Configuration Modal -->
+        <div class="modal fade" id="configModal" tabindex="-1" aria-labelledby="configModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="configModalLabel">
+                            <i class="bi bi-gear-fill"></i> Configurações do Sistema
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <!-- Webhook Configuration -->
+                            <div class="col-md-6 mb-3">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0"><i class="bi bi-send"></i> Webhook de Destino</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="webhookUrl" class="form-label">URL do Webhook:</label>
+                                            <input type="url" id="webhookUrl" class="form-control" placeholder="https://webhook.example.com/endpoint">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="webhookTimeout" class="form-label">Timeout (segundos):</label>
+                                            <input type="number" id="webhookTimeout" class="form-control" value="5" min="1" max="60">
+                                        </div>
+                                        <button id="updateWebhookBtn" class="btn btn-primary btn-sm">
+                                            <i class="bi bi-check"></i> Atualizar Webhook
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Finviz Configuration -->
+                            <div class="col-md-6 mb-3">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0"><i class="bi bi-graph-up"></i> Configurações Finviz</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="finvizUrl" class="form-label">URL do Finviz:</label>
+                                            <input type="url" id="finvizUrl" class="form-control">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="topN" class="form-label">Top-N Tickers:</label>
+                                            <input type="number" id="topN" class="form-control" value="15" min="1" max="1000">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="refreshInterval" class="form-label">Intervalo de Atualização (seg):</label>
+                                            <input type="number" id="refreshInterval" class="form-control" value="10" min="5" max="3600">
+                                        </div>
+                                        <button id="updateFinvizBtn" class="btn btn-primary btn-sm">
+                                            <i class="bi bi-check"></i> Atualizar Finviz
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Rate Limiter Configuration -->
+                            <div class="col-md-6 mb-3">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0"><i class="bi bi-speedometer"></i> Rate Limiter</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="maxReqPerMin" class="form-label">Máx Req/Min:</label>
+                                            <input type="number" id="maxReqPerMin" class="form-control" value="60" min="1" max="1000">
+                                        </div>
+                                        <div class="form-check mb-3">
+                                            <input class="form-check-input" type="checkbox" id="rateLimitingEnabled" checked>
+                                            <label class="form-check-label" for="rateLimitingEnabled">
+                                                Rate Limiting Habilitado
+                                            </label>
+                                        </div>
+                                        <button id="updateRateLimiterBtn" class="btn btn-primary btn-sm">
+                                            <i class="bi bi-check"></i> Atualizar Rate Limiter
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Token Configuration -->
+                            <div class="col-md-6 mb-3">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0"><i class="bi bi-key"></i> Token de Administração</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="adminToken" class="form-label">Token Atual:</label>
+                                            <div class="input-group">
+                                                <input type="password" id="adminToken" class="form-control" placeholder="Digite o token">
+                                                <button class="btn btn-outline-secondary" type="button" id="toggleTokenVisibility">
+                                                    <i class="bi bi-eye"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="alert alert-info small">
+                                            <i class="bi bi-info-circle"></i> Token será salvo no navegador para uso automático
+                                        </div>
+                                        <button id="saveTokenBtn" class="btn btn-success btn-sm">
+                                            <i class="bi bi-save"></i> Salvar Token
+                                        </button>
+                                        <button id="clearTokenBtn" class="btn btn-outline-danger btn-sm">
+                                            <i class="bi bi-trash"></i> Limpar Token
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                        <button type="button" class="btn btn-primary" id="loadCurrentConfigBtn">
+                            <i class="bi bi-arrow-clockwise"></i> Carregar Configuração Atual
+                        </button>
                     </div>
                 </div>
             </div>
@@ -793,91 +934,114 @@
             }
         }        // Update charts with historical data
         async function updateChartsWithData(data) {
-            // Try to get real historical data from the new endpoint
+            // Always try to get real historical data from the database
             try {
+                console.log('Fetching signals history...');
                 const historyResponse = await fetch('/admin/signals-history?hours=24');
                 if (!historyResponse.ok) {
                     throw new Error(`HTTP ${historyResponse.status}: ${historyResponse.statusText}`);
                 }
                 const historyData = await historyResponse.json();
+                console.log('History data received:', historyData);
                 
-                if (historyData.data && historyData.data.length > 0) {
-                    // Use real historical data
-                    const labels = historyData.data.map(item => item.hour);
-                    const signalData = historyData.data.map(item => item.signals_received);
+                // Always update chart, even with zero data
+                if (historyData.data && Array.isArray(historyData.data)) {
+                    const labels = historyData.data.map(item => item.hour || item.hour_label || 'N/A');
+                    const signalData = historyData.data.map(item => 
+                        item.signals_received || item.total_signals || 0
+                    );
+                    
+                    console.log('Chart data - Labels:', labels, 'Data:', signalData);
                     
                     if (signalsChart) {
                         signalsChart.data.labels = labels;
                         signalsChart.data.datasets[0].data = signalData;
                         signalsChart.update();
+                        console.log('Chart updated successfully');
                     }
                     
-                    // Add note about data source
-                    const chartContainer = document.querySelector('#signalsChart').parentElement;
-                    let sourceNote = chartContainer.querySelector('.data-source-note');
-                    if (!sourceNote) {
-                        sourceNote = document.createElement('small');
-                        sourceNote.className = 'data-source-note text-muted d-block mt-2';
-                        chartContainer.appendChild(sourceNote);
-                    }
-                    
-                    if (historyData.source === 'database') {
-                        sourceNote.textContent = '📊 Dados reais do PostgreSQL';
-                        sourceNote.className = 'data-source-note text-success d-block mt-2';
-                    } else if (historyData.source === 'calculated') {
-                        sourceNote.textContent = '📈 Dados estimados baseados nas métricas atuais';
-                        sourceNote.className = 'data-source-note text-warning d-block mt-2';
-                    }
-                    
+                    // Update data source note
+                    updateChartSourceNote(historyData);
                     return; // Success - exit early
+                } else {
+                    console.warn('No data array in history response');
+                    throw new Error('Invalid data format received');
                 }
             } catch (error) {
-                console.warn('Failed to load historical data:', error);
-                showAlert('Aviso: Dados históricos indisponíveis - ' + error.message, 'warning');
+                console.error('Failed to load historical data:', error);
+                showAlert('Dados históricos não disponíveis, usando fallback', 'warning');
+                
+                // Generate fallback data if all else fails
+                generateFallbackChartData(data);
+            }
+        }
+        
+        function updateChartSourceNote(historyData) {
+            const chartContainer = document.querySelector('#signalsChart').parentElement;
+            let sourceNote = chartContainer.querySelector('.data-source-note');
+            if (!sourceNote) {
+                sourceNote = document.createElement('small');
+                sourceNote.className = 'data-source-note text-muted d-block mt-2';
+                chartContainer.appendChild(sourceNote);
             }
             
-            // Fallback to basic calculation if endpoint fails
-            if (signalsChart && data.metrics) {
-                // Generate hourly labels for the last 24 hours
-                const now = new Date();
-                const labels = [];
-                const signalData = [];
-                
-                // Get current metrics for reference
-                const totalSignals = data.metrics.signals_received || 0;
-                const hoursOfUptime = data.system_info && data.system_info.uptime_seconds ? 
-                    Math.min(24, data.system_info.uptime_seconds / 3600) : 0;
-                
-                // Generate basic fallback data
-                for (let i = 23; i >= 0; i--) {
-                    const hour = new Date(now.getTime() - (i * 60 * 60 * 1000));
-                    labels.push(hour.getHours() + ':00');
-                    
-                    if (i >= (24 - hoursOfUptime)) {
-                        // System was running during this hour
-                        const hourlyAverage = hoursOfUptime > 0 ? totalSignals / hoursOfUptime : 0;
-                        signalData.push(Math.max(0, Math.floor(hourlyAverage + (Math.random() - 0.5) * hourlyAverage * 0.3)));
-                    } else {
-                        // System wasn't running - no signals
-                        signalData.push(0);
-                    }
-                }
-                
-                signalsChart.data.labels = labels;
-                signalsChart.data.datasets[0].data = signalData;
-                signalsChart.update();
-                
-                // Add fallback note
-                const chartContainer = document.querySelector('#signalsChart').parentElement;
-                let sourceNote = chartContainer.querySelector('.data-source-note');
-                if (!sourceNote) {
-                    sourceNote = document.createElement('small');
-                    sourceNote.className = 'data-source-note text-muted d-block mt-2';
-                    chartContainer.appendChild(sourceNote);
-                }
-                sourceNote.textContent = '⚠️ Dados básicos de fallback (histórico indisponível)';
-                sourceNote.className = 'data-source-note text-muted d-block mt-2';
+            const totalSignals = historyData.data ? 
+                historyData.data.reduce((sum, item) => sum + (item.signals_received || item.total_signals || 0), 0) : 0;
+            
+            if (historyData.source === 'database') {
+                sourceNote.textContent = `📊 Dados reais do PostgreSQL (${totalSignals} sinais em 24h)`;
+                sourceNote.className = 'data-source-note text-success d-block mt-2';
+            } else if (historyData.source === 'calculated') {
+                sourceNote.textContent = `📈 Dados estimados (${totalSignals} sinais estimados)`;
+                sourceNote.className = 'data-source-note text-warning d-block mt-2';
+            } else {
+                sourceNote.textContent = `ℹ️ Fonte: ${historyData.source || 'desconhecida'} (${totalSignals} sinais)`;
+                sourceNote.className = 'data-source-note text-info d-block mt-2';
             }
+        }
+        
+        function generateFallbackChartData(data) {
+            if (!signalsChart) return;
+            
+            // Generate hourly labels for the last 24 hours
+            const now = new Date();
+            const labels = [];
+            const signalData = [];
+            
+            // Get current metrics for reference
+            const totalSignals = data?.metrics?.signals_received || 0;
+            const hoursOfUptime = data?.system_info?.uptime_seconds ? 
+                Math.min(24, data.system_info.uptime_seconds / 3600) : 1;
+            
+            // Generate basic fallback data
+            for (let i = 23; i >= 0; i--) {
+                const hour = new Date(now.getTime() - (i * 60 * 60 * 1000));
+                labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
+                
+                if (i >= (24 - hoursOfUptime)) {
+                    // System was running during this hour
+                    const hourlyAverage = hoursOfUptime > 0 ? totalSignals / hoursOfUptime : 0;
+                    signalData.push(Math.max(0, Math.floor(hourlyAverage + (Math.random() - 0.5) * hourlyAverage * 0.3)));
+                } else {
+                    // System wasn't running - no signals
+                    signalData.push(0);
+                }
+            }
+            
+            signalsChart.data.labels = labels;
+            signalsChart.data.datasets[0].data = signalData;
+            signalsChart.update();
+            
+            // Add fallback note
+            const chartContainer = document.querySelector('#signalsChart').parentElement;
+            let sourceNote = chartContainer.querySelector('.data-source-note');
+            if (!sourceNote) {
+                sourceNote = document.createElement('small');
+                sourceNote.className = 'data-source-note text-muted d-block mt-2';
+                chartContainer.appendChild(sourceNote);
+            }
+            sourceNote.textContent = '⚠️ Dados básicos de fallback (histórico indisponível)';
+            sourceNote.className = 'data-source-note text-muted d-block mt-2';
         }
         
         // Load sell all list
@@ -1198,6 +1362,231 @@
                 return `${minutes}m`;
             }
         }
+        
+        // Configuration Panel Functions
+        function initializeConfigPanel() {
+            // Bind configuration modal events
+            document.getElementById('openConfigBtn').addEventListener('click', openConfigModal);
+            document.getElementById('setTokenBtn').addEventListener('click', setAdminToken);
+            document.getElementById('loadCurrentConfigBtn').addEventListener('click', loadCurrentConfig);
+            
+            // Bind configuration update buttons
+            document.getElementById('updateWebhookBtn').addEventListener('click', updateWebhookConfig);
+            document.getElementById('updateFinvizBtn').addEventListener('click', updateFinvizConfig);
+            document.getElementById('updateRateLimiterBtn').addEventListener('click', updateRateLimiterConfig);
+            
+            // Token management
+            document.getElementById('saveTokenBtn').addEventListener('click', saveAdminToken);
+            document.getElementById('clearTokenBtn').addEventListener('click', clearAdminToken);
+            document.getElementById('toggleTokenVisibility').addEventListener('click', toggleTokenVisibility);
+            
+            // Load saved token if available
+            loadSavedToken();
+        }
+        
+        function openConfigModal() {
+            const modal = new bootstrap.Modal(document.getElementById('configModal'));
+            modal.show();
+            loadCurrentConfig();
+        }
+        
+        function setAdminToken() {
+            const token = prompt('Digite o token de administrador:');
+            if (token) {
+                localStorage.setItem('admin_token', token);
+                document.getElementById('adminToken').value = token;
+                showAlert('Token salvo com sucesso!', 'success');
+            }
+        }
+        
+        async function loadCurrentConfig() {
+            try {
+                // Load webhook config
+                const webhookResponse = await fetch('/admin/webhook/config');
+                if (webhookResponse.ok) {
+                    const webhookData = await webhookResponse.json();
+                    document.getElementById('webhookUrl').value = webhookData.webhook_url || '';
+                    document.getElementById('webhookTimeout').value = webhookData.timeout || 5;
+                }
+                
+                // Load finviz config
+                const finvizResponse = await fetch('/admin/finviz/config');
+                if (finvizResponse.ok) {
+                    const finvizData = await finvizResponse.json();
+                    document.getElementById('finvizUrl').value = finvizData.finviz_url || '';
+                    document.getElementById('topN').value = finvizData.top_n || 15;
+                    document.getElementById('refreshInterval').value = finvizData.refresh_interval_sec || 10;
+                }
+                
+                // Load rate limiter config (from system status)
+                const statusResponse = await fetch('/admin/status');
+                if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    const rlInfo = statusData.system_info?.webhook_rate_limiter || {};
+                    document.getElementById('maxReqPerMin').value = rlInfo.max_req_per_min || 60;
+                    document.getElementById('rateLimitingEnabled').checked = !rlInfo.paused;
+                }
+                
+            } catch (error) {
+                console.error('Error loading current config:', error);
+                showAlert('Erro ao carregar configurações atuais', 'warning');
+            }
+        }
+        
+        async function updateWebhookConfig() {
+            const token = getAdminToken();
+            if (!token) return;
+            
+            const webhookUrl = document.getElementById('webhookUrl').value;
+            const timeout = document.getElementById('webhookTimeout').value;
+            
+            if (!webhookUrl) {
+                showAlert('URL do webhook é obrigatória', 'warning');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/admin/webhook/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: token,
+                        webhook_url: webhookUrl,
+                        timeout: parseInt(timeout)
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert('Configuração do webhook atualizada com sucesso!', 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error updating webhook config:', error);
+                showAlert('Erro ao atualizar configuração do webhook: ' + error.message, 'danger');
+            }
+        }
+        
+        async function updateFinvizConfig() {
+            const token = getAdminToken();
+            if (!token) return;
+            
+            const finvizUrl = document.getElementById('finvizUrl').value;
+            const topN = document.getElementById('topN').value;
+            const refreshInterval = document.getElementById('refreshInterval').value;
+            
+            if (!finvizUrl) {
+                showAlert('URL do Finviz é obrigatória', 'warning');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/finviz/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: token,
+                        finviz_url: finvizUrl,
+                        top_n: parseInt(topN),
+                        refresh_interval_sec: parseInt(refreshInterval)
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert('Configuração do Finviz atualizada com sucesso!', 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error updating finviz config:', error);
+                showAlert('Erro ao atualizar configuração do Finviz: ' + error.message, 'danger');
+            }
+        }
+        
+        async function updateRateLimiterConfig() {
+            const token = getAdminToken();
+            if (!token) return;
+            
+            const maxReqPerMin = document.getElementById('maxReqPerMin').value;
+            const enabled = document.getElementById('rateLimitingEnabled').checked;
+            
+            try {
+                const response = await fetch('/admin/webhook-rate-limiter/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: token,
+                        max_req_per_min: parseInt(maxReqPerMin),
+                        enabled: enabled
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert('Configuração do Rate Limiter atualizada com sucesso!', 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error updating rate limiter config:', error);
+                showAlert('Erro ao atualizar configuração do Rate Limiter: ' + error.message, 'danger');
+            }
+        }
+        
+        function getAdminToken() {
+            let token = localStorage.getItem('admin_token');
+            if (!token) {
+                token = prompt('Digite o token de administrador:');
+                if (token) {
+                    localStorage.setItem('admin_token', token);
+                } else {
+                    showAlert('Token necessário para realizar alterações', 'warning');
+                    return null;
+                }
+            }
+            return token;
+        }
+        
+        function saveAdminToken() {
+            const token = document.getElementById('adminToken').value;
+            if (token) {
+                localStorage.setItem('admin_token', token);
+                showAlert('Token salvo com sucesso!', 'success');
+            } else {
+                showAlert('Digite um token válido', 'warning');
+            }
+        }
+        
+        function clearAdminToken() {
+            localStorage.removeItem('admin_token');
+            document.getElementById('adminToken').value = '';
+            showAlert('Token removido', 'info');
+        }
+        
+        function toggleTokenVisibility() {
+            const tokenInput = document.getElementById('adminToken');
+            const toggleBtn = document.getElementById('toggleTokenVisibility');
+            const icon = toggleBtn.querySelector('i');
+            
+            if (tokenInput.type === 'password') {
+                tokenInput.type = 'text';
+                icon.className = 'bi bi-eye-slash';
+            } else {
+                tokenInput.type = 'password';
+                icon.className = 'bi bi-eye';
+            }
+        }
+        
+        function loadSavedToken() {
+            const savedToken = localStorage.getItem('admin_token');
+            if (savedToken) {
+                document.getElementById('adminToken').value = savedToken;
+            }
+        }
+        
+        // Initialize configuration panel when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeConfigPanel();
+        });
     </script>
 </body>
 </html>

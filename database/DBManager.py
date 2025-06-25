@@ -219,13 +219,15 @@ class DBManager:
     async def get_hourly_signal_stats(self, hours: int = 24) -> List[Dict[str, Any]]:
         """
         Obtém estatísticas de sinal por hora para as últimas N horas.
-        Retorna os dados formatados para gráficos.
+        Retorna os dados formatados para gráficos, sempre preenchendo horas faltantes com zeros.
         """
         try:
             async with self.get_session() as session:
-                # Calcular intervalo de tempo
+                # Calcular intervalo de tempo - usar timezone-aware datetime
                 end_time = datetime.utcnow()
                 start_time = end_time - timedelta(hours=hours)
+                
+                _logger.info(f"Getting hourly stats from {start_time} to {end_time} ({hours} hours)")
                 
                 # Consulta para obter dados agregados por hora
                 query = text("""
@@ -246,10 +248,18 @@ class DBManager:
                     'end_time': end_time
                 })
                 
-                hourly_data = []
-                data_by_hour = {row.hour: row for row in result}
+                # Mapear dados do banco por hora
+                data_by_hour = {}
+                for row in result:
+                    # Garantir que a hora seja timezone-aware
+                    hour_key = row.hour.replace(tzinfo=None) if row.hour.tzinfo else row.hour
+                    data_by_hour[hour_key] = row
                 
-                # Preencher horas faltantes com dados zero
+                _logger.info(f"Found data for {len(data_by_hour)} hours in database")
+                
+                hourly_data = []
+                
+                # Preencher TODAS as horas no intervalo, mesmo que não tenham dados
                 for i in range(hours):
                     hour_time = end_time - timedelta(hours=hours-1-i)
                     hour_key = hour_time.replace(minute=0, second=0, microsecond=0)
@@ -258,27 +268,63 @@ class DBManager:
                         row = data_by_hour[hour_key]
                         hourly_data.append({
                             "hour": hour_time.strftime("%H:00"),
+                            "hour_label": hour_time.strftime("%H:00"),
+                            "date": hour_time.strftime("%Y-%m-%d"),
                             "timestamp": hour_time.timestamp(),
-                            "signals_received": row.total_signals,
-                            "signals_approved": row.approved_signals,
-                            "signals_rejected": row.rejected_signals,
-                            "signals_forwarded": row.forwarded_signals
+                            "total_signals": row.total_signals,
+                            "signals_received": row.total_signals,  # Alias for frontend compatibility
+                            "approved_signals": row.approved_signals,
+                            "signals_approved": row.approved_signals,  # Alias for frontend compatibility
+                            "rejected_signals": row.rejected_signals,
+                            "signals_rejected": row.rejected_signals,  # Alias for frontend compatibility
+                            "forwarded_signals": row.forwarded_signals,
+                            "signals_forwarded": row.forwarded_signals  # Alias for frontend compatibility
                         })
                     else:
+                        # Preencher hora sem dados com zeros
                         hourly_data.append({
                             "hour": hour_time.strftime("%H:00"),
+                            "hour_label": hour_time.strftime("%H:00"),
+                            "date": hour_time.strftime("%Y-%m-%d"),
                             "timestamp": hour_time.timestamp(),
+                            "total_signals": 0,
                             "signals_received": 0,
+                            "approved_signals": 0,
                             "signals_approved": 0,
+                            "rejected_signals": 0,
                             "signals_rejected": 0,
+                            "forwarded_signals": 0,
                             "signals_forwarded": 0
                         })
                 
+                _logger.info(f"Returning {len(hourly_data)} hourly data points")
                 return hourly_data
                 
         except Exception as e:
-            _logger.error(f"Erro ao obter estatísticas horárias de sinais: {e}")
-            return []
+            _logger.error(f"Erro ao obter estatísticas horárias de sinais: {e}", exc_info=True)
+            
+            # Retornar dados de fallback em caso de erro
+            hourly_data = []
+            end_time = datetime.utcnow()
+            for i in range(hours):
+                hour_time = end_time - timedelta(hours=hours-1-i)
+                hourly_data.append({
+                    "hour": hour_time.strftime("%H:00"),
+                    "hour_label": hour_time.strftime("%H:00"),
+                    "date": hour_time.strftime("%Y-%m-%d"),
+                    "timestamp": hour_time.timestamp(),
+                    "total_signals": 0,
+                    "signals_received": 0,
+                    "approved_signals": 0,
+                    "signals_approved": 0,
+                    "rejected_signals": 0,
+                    "signals_rejected": 0,
+                    "forwarded_signals": 0,
+                    "signals_forwarded": 0
+                })
+            
+            _logger.warning(f"Returning fallback data with {len(hourly_data)} zero-filled hours")
+            return hourly_data
 
     async def query_signals(self, query_params: AuditTrailQuery) -> AuditTrailResponse:
         """Consulta avançada de sinais com filtros, paginação e ordenação."""
@@ -359,10 +405,16 @@ class DBManager:
         status_filter: Optional[str] = None,
         ticker_filter: Optional[str] = None,
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
+        hours: Optional[int] = None,
+        **kwargs  # Accept additional parameters for backward compatibility
     ) -> List[Dict[str, Any]]:
-        """Método de compatibilidade para get_audit_trail (legacy API)."""
+        """Método de compatibilidade para get_audit_trail (legacy API) com filtros melhorados."""
         from models import AuditTrailQuery
+        
+        # Apply hours filter if provided
+        if hours and not start_time:
+            start_time = datetime.utcnow() - timedelta(hours=hours)
         
         # Mapear parâmetros legacy para nova API
         query_params = AuditTrailQuery(
@@ -385,20 +437,36 @@ class DBManager:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         signal_id: Optional[str] = None,
-        event_types: Optional[List[str]] = None
+        event_types: Optional[List[str]] = None,
+        status_filter: Optional[str] = None,
+        ticker_filter: Optional[str] = None,
+        hours: Optional[int] = None,
+        **kwargs  # Accept additional parameters for backward compatibility
     ) -> int:
-        """Conta os registros de auditoria com base nos filtros."""
+        """Conta os registros de auditoria com base nos filtros melhorados."""
         async with self.get_session() as session:
-            query = select(func.count(SignalEvent.event_id))
+            # Join signals and signal_events if we need ticker filtering
+            if ticker_filter:
+                query = select(func.count(Signal.signal_id.distinct())).select_from(
+                    Signal.join(SignalEvent, Signal.signal_id == SignalEvent.signal_id)
+                )
+            else:
+                query = select(func.count(Signal.signal_id))
+            
+            # Apply time filters (prefer hours if provided)
+            if hours and not start_time:
+                start_time = datetime.utcnow() - timedelta(hours=hours)
             
             if start_time:
-                query = query.where(SignalEvent.timestamp >= start_time)
+                query = query.where(Signal.created_at >= start_time)
             if end_time:
-                query = query.where(SignalEvent.timestamp <= end_time)
+                query = query.where(Signal.created_at <= end_time)
             if signal_id:
-                query = query.where(SignalEvent.signal_id == signal_id)
-            if event_types:
-                query = query.where(SignalEvent.status.in_(event_types))
+                query = query.where(Signal.signal_id == signal_id)
+            if status_filter:
+                query = query.where(Signal.status == status_filter)
+            if ticker_filter:
+                query = query.where(Signal.ticker.ilike(f'%{ticker_filter}%'))
             
             result = await session.execute(query)
             return result.scalar_one()
@@ -552,43 +620,61 @@ class DBManager:
     def _signal_to_dict(self, signal: Signal, include_events: bool) -> Dict[str, Any]:
         """Converte um objeto SQLAlchemy Signal em um dicionário para a API."""
         from datetime import datetime
+        
+        def safe_datetime_format(dt):
+            """Safely format datetime to ISO string."""
+            if dt is None:
+                return None
+            if hasattr(dt, 'isoformat'):
+                return dt.isoformat() + 'Z'
+            try:
+                return datetime.utcfromtimestamp(float(dt)).isoformat() + 'Z'
+            except (ValueError, TypeError, OSError):
+                return str(dt) if dt else None
+        
         data = {
             "signal_id": str(signal.signal_id),
-            "ticker": signal.ticker,
-            "normalised_ticker": getattr(signal, 'normalised_ticker', None),
-            "timestamp": signal.updated_at.isoformat() + 'Z' if hasattr(signal.updated_at, 'isoformat') else datetime.utcfromtimestamp(signal.updated_at).isoformat() + 'Z',
-            "status": getattr(signal, 'status', None),
-            "status_display": getattr(signal, 'status', '').replace('_', ' ').title() if getattr(signal, 'status', None) else '-',
-            "created_at": signal.created_at.isoformat() + 'Z' if hasattr(signal.created_at, 'isoformat') else datetime.utcfromtimestamp(signal.created_at).isoformat() + 'Z',
-            "updated_at": signal.updated_at.isoformat() + 'Z' if hasattr(signal.updated_at, 'isoformat') else datetime.utcfromtimestamp(signal.updated_at).isoformat() + 'Z',
+            "ticker": signal.ticker or '-',
+            "normalised_ticker": getattr(signal, 'normalised_ticker', None) or '-',
+            "timestamp": safe_datetime_format(signal.updated_at),
+            "status": getattr(signal, 'status', None) or 'unknown',
+            "status_display": (getattr(signal, 'status', '') or '').replace('_', ' ').title() or 'Unknown',
+            "created_at": safe_datetime_format(signal.created_at),
+            "updated_at": safe_datetime_format(signal.updated_at),
             "processing_time_ms": getattr(signal, 'processing_time_ms', None),
             "error_message": getattr(signal, 'error_message', None),
             "original_signal": getattr(signal, 'original_signal', None),
         }
+        
         if include_events and hasattr(signal, 'events'):
             data["events"] = []
-            for event in sorted(signal.events, key=lambda e: getattr(e, 'timestamp', 0)):
-                # Corrigir timestamp float para datetime
-                ts = getattr(event, 'timestamp', None)
-                if ts is not None:
-                    if hasattr(ts, 'isoformat'):
-                        ts_str = ts.isoformat() + 'Z'
-                    else:
-                        try:
-                            ts_str = datetime.utcfromtimestamp(float(ts)).isoformat() + 'Z'
-                        except Exception:
-                            ts_str = '-'
-                else:
-                    ts_str = '-'
-                data["events"].append({
-                    "timestamp": ts_str,
-                    "event_type": getattr(event, 'event_type', getattr(event, 'status', '-')),
-                    "location": getattr(event, 'location', '-'),
-                    "details": getattr(event, 'details', '-'),
-                    "worker_id": getattr(event, 'worker_id', '-'),
+            for event in sorted(signal.events, key=lambda e: getattr(e, 'timestamp', datetime.min)):
+                event_data = {
+                    "timestamp": safe_datetime_format(getattr(event, 'timestamp', None)),
+                    "event_type": getattr(event, 'status', 'unknown'),  # Use status as event_type
+                    "location": self._derive_location_from_status(getattr(event, 'status', '')),
+                    "details": getattr(event, 'details', '') or '-',
+                    "worker_id": getattr(event, 'worker_id', '') or '-',
                     "http_status": getattr(event, 'http_status', None),
-                })
+                }
+                data["events"].append(event_data)
         return data
+    
+    def _derive_location_from_status(self, status: str) -> str:
+        """Derive location from status for backward compatibility."""
+        status = status.lower()
+        if status in ['received']:
+            return 'PROCESSING_QUEUE'
+        elif status in ['processing']:
+            return 'WORKER_PROCESSING'
+        elif status in ['approved']:
+            return 'APPROVED_QUEUE'
+        elif status in ['forwarded_success', 'forwarded_error']:
+            return 'WORKER_FORWARDING'
+        elif status in ['rejected', 'error']:
+            return 'DISCARDED'
+        else:
+            return 'COMPLETED' if status in ['completed'] else 'PROCESSING_QUEUE'
 
 # Instância Singleton Global - para ser importada em toda a aplicação
 db_manager = DBManager()

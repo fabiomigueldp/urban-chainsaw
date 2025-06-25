@@ -1542,29 +1542,54 @@ async def get_signals_history(hours: int = 24):
 # ---------------------------------------------------------------------------- #
 
 @app.get("/admin/audit-trail")
-async def get_admin_audit_trail(limit: int = 20, offset: int = 0, status_filter: str = None, ticker: str = None, hours: int = None):
-    """Retorna eventos de auditoria para o painel admin."""
+async def get_admin_audit_trail(
+    limit: int = 20, 
+    offset: int = 0, 
+    status_filter: str = None, 
+    ticker: str = None, 
+    hours: int = None
+):
+    """Retorna eventos de auditoria para o painel admin com filtros melhorados."""
     try:
-        # Monta filtros
+        # Monta filtros para o DBManager
         filters = {}
         if status_filter:
-            filters['status'] = status_filter
+            filters['status_filter'] = status_filter
         if ticker:
-            filters['ticker'] = ticker
+            filters['ticker_filter'] = ticker
         if hours:
             filters['hours'] = hours
+            
+        _logger.info(f"Audit trail request - limit: {limit}, offset: {offset}, filters: {filters}")
+        
         # Busca dados no banco
-        events = await db_manager.get_audit_trail(limit=limit, offset=offset, **filters)
+        events = await db_manager.get_audit_trail(
+            limit=limit, 
+            offset=offset, 
+            **filters
+        )
         total = await db_manager.get_audit_trail_count(**filters)
+        
+        _logger.info(f"Audit trail response - events: {len(events)}, total: {total}")
+        
         return {
             "events": events,
             "total": total,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
+            "has_more": offset + len(events) < total,
+            "filters_applied": filters
         }
     except Exception as e:
-        _logger.error(f"Erro ao buscar audit trail: {e}")
-        return {"events": [], "total": 0, "error": str(e)}
+        _logger.error(f"Erro ao buscar audit trail: {e}", exc_info=True)
+        return {
+            "events": [], 
+            "total": 0, 
+            "error": str(e),
+            "limit": limit,
+            "offset": offset,
+            "has_more": False
+        }
 
 # ---------------------------------------------------------------------------- #
 # Additional Admin Management Endpoints                                       #
@@ -1684,177 +1709,99 @@ async def queue_to_sell_all(payload: dict = Body(...)):
         _logger.error(f"Error adding ticker to sell-all accumulator: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-@app.get("/admin/finviz-config")
+@app.get("/admin/webhook/config")
+async def get_webhook_config():
+    """Get current webhook configuration."""
+    try:
+        return {
+            "webhook_url": settings.DEST_WEBHOOK_URL,
+            "timeout": getattr(settings, 'DEST_WEBHOOK_TIMEOUT', 5),
+            "rate_limiting_enabled": getattr(settings, 'DEST_WEBHOOK_RATE_LIMITING_ENABLED', True),
+            "max_req_per_min": get_max_req_per_min(),
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        _logger.error(f"Error getting webhook config: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving webhook config")
+
+@app.get("/admin/finviz/config")
 async def get_finviz_config():
-    """Get current Finviz configuration including URL."""
-    try:        # Load config from finviz_config.json
-        import os
-        config_file = settings.FINVIZ_CONFIG_FILE
-        if os.path.exists(config_file):
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-        else:
-            config = {
-                "finviz_url": "N/A",
-                "top_n": settings.TOP_N,
-                "refresh_interval_sec": settings.FINVIZ_REFRESH_SEC
-            }
+    """Get current Finviz configuration."""
+    try:
+        # Load from finviz config file
+        finviz_config = load_finviz_config()
         
         return {
-            "finviz_url": config.get("finviz_url", "N/A"),
-            "top_n": config.get("top_n", settings.TOP_N),
-            "refresh_interval_sec": config.get("refresh_interval_sec", settings.FINVIZ_REFRESH_SEC)
+            "finviz_url": finviz_config.get("finviz_url", ""),
+            "top_n": finviz_config.get("top_n", 15),
+            "refresh_interval_sec": finviz_config.get("refresh_interval_sec", 10),
+            "timestamp": time.time()
         }
-        
     except Exception as e:
-        _logger.error(f"Error getting Finviz config: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving Finviz config: {str(e)}"
-        )
+        _logger.error(f"Error getting finviz config: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving finviz config")
 
-# ---------------------------------------------------------------------------- #
-# Real-Time Analytics Endpoints (Database-Driven)                             #
-# ---------------------------------------------------------------------------- #
-
-@app.get("/admin/real-time-analytics")
-async def get_real_time_analytics():
-    """Get comprehensive real-time analytics directly from database."""
+@app.post("/admin/system/config", status_code=status.HTTP_204_NO_CONTENT)
+async def update_system_config(payload: dict = Body(...)):
+    """Update multiple system configurations at once."""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    
     try:
-        # Get all analytics from database in a single call
-        db_analytics = await db_manager.get_system_analytics()
-        hourly_stats = await db_manager.get_hourly_signal_stats(24)
-        status_distribution = await db_manager.get_signal_status_distribution()
-        recent_signals = await db_manager.get_recent_signals(10)
+        updated_configs = []
         
-        # Calculate additional metrics
-        current_time = time.time()
-        start_time = shared_state["signal_metrics"]["metrics_start_time"]
-        uptime_seconds = current_time - start_time if start_time else 0
+        # Update webhook config if provided
+        if "webhook" in payload:
+            webhook_config = payload["webhook"]
+            if "url" in webhook_config:
+                settings.DEST_WEBHOOK_URL = webhook_config["url"]
+                updated_configs.append("webhook_url")
+            if "timeout" in webhook_config:
+                settings.DEST_WEBHOOK_TIMEOUT = int(webhook_config["timeout"])
+                updated_configs.append("webhook_timeout")
         
-        total_signals = db_analytics.get("total_signals", 0)
-        approved_signals = db_analytics.get("approved_signals", 0)
-        
-        # Real-time queue data
-        queue_data = {
-            "processing_queue_size": queue.qsize() if queue else 0,
-            "approved_queue_size": approved_signal_queue.qsize() if approved_signal_queue else 0,
-            "max_queue_size": queue.maxsize if queue else 0
-        }
-        
-        # Comprehensive analytics response
-        analytics = {
-            "database_metrics": db_analytics,
-            "queue_metrics": queue_data,
-            "hourly_trends": hourly_stats,
-            "status_distribution": status_distribution,
-            "recent_activity": recent_signals,
-            "calculated_metrics": {
-                "approval_rate_percent": round((approved_signals / total_signals * 100), 2) if total_signals > 0 else 0,
-                "signals_per_minute": round(total_signals / (uptime_seconds / 60), 2) if uptime_seconds > 0 else 0
-            },
-            "timestamp": current_time,
-            "data_source": "database_realtime"
-        }
-        
-        return analytics
-        
-    except Exception as e:
-        _logger.error(f"Error getting real-time analytics: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting real-time analytics: {str(e)}"
-        )
-
-@app.get("/admin/signals-history")
-async def get_signals_history(hours: int = 24):
-    """Get signal history and trends directly from database with formatted data for charts."""
-    try:
-        # Get hourly signal statistics from database
-        hourly_stats = await db_manager.get_hourly_signal_stats(hours)
-        
-        # Fallback to calculated data if database doesn't have enough data
-        if not hourly_stats or len(hourly_stats) == 0:
-            _logger.warning("No historical data available, generating fallback data")
-            # Generate fallback hourly data
-            current_time = datetime.datetime.now()
-            fallback_data = []
+        # Update finviz config if provided
+        if "finviz" in payload:
+            finviz_config = payload["finviz"]
+            engine: Optional[FinvizEngine] = shared_state.get("finviz_engine_instance")
             
-            # Get current metrics for estimation
-            current_metrics = get_current_metrics()
-            total_signals = current_metrics.get("signals_received", 0)
-            
-            for i in range(hours):
-                hour_time = current_time - datetime.timedelta(hours=i)
-                # Estimate signals per hour based on total
-                signals_estimate = max(0, int(total_signals / max(1, hours)) + (i % 3))
+            if engine and any(key in finviz_config for key in ["url", "top_n", "refresh_interval_sec"]):
+                # Build new config
+                new_config = {}
+                if "url" in finviz_config:
+                    new_config["finviz_url"] = finviz_config["url"]
+                    updated_configs.append("finviz_url")
+                if "top_n" in finviz_config:
+                    new_config["top_n"] = int(finviz_config["top_n"])
+                    updated_configs.append("finviz_top_n")
+                if "refresh_interval_sec" in finviz_config:
+                    new_config["refresh_interval_sec"] = int(finviz_config["refresh_interval_sec"])
+                    updated_configs.append("finviz_refresh_interval")
                 
-                fallback_data.append({
-                    "hour": hour_time.strftime("%H:%00"),
-                    "date": hour_time.strftime("%Y-%m-%d"),
-                    "signals_received": signals_estimate,
-                    "signals_approved": int(signals_estimate * 0.7),
-                    "signals_rejected": int(signals_estimate * 0.3),
-                    "timestamp": hour_time.timestamp()
-                })
-            
-            fallback_data.reverse()  # Most recent first
-            
-            return {
-                "data": fallback_data,
-                "source": "calculated",
-                "hours_analyzed": hours,
-                "message": "Database data not available, showing estimated data",
-                "timestamp": time.time()
-            }
+                await engine.update_config(new_config)
         
-        # Format data for frontend charts
-        formatted_data = []
-        for stat in hourly_stats:
-            # Convert database data to frontend format
-            formatted_data.append({
-                "hour": stat.get("hour_label", "00:00"),
-                "date": stat.get("date", ""),
-                "signals_received": stat.get("total_signals", 0),
-                "signals_approved": stat.get("approved_signals", 0),
-                "signals_rejected": stat.get("rejected_signals", 0),
-                "signals_forwarded": stat.get("forwarded_signals", 0),
-                "timestamp": stat.get("timestamp", time.time())
-            })
+        # Update rate limiter config if provided
+        if "rate_limiter" in payload:
+            rl_config = payload["rate_limiter"]
+            webhook_rl: Optional[WebhookRateLimiter] = shared_state.get("webhook_rate_limiter_instance")
+            
+            if webhook_rl:
+                if "max_req_per_min" in rl_config:
+                    await webhook_rl.update_config(max_req_per_min=int(rl_config["max_req_per_min"]))
+                    updated_configs.append("rate_limiter_max_req")
+                if "enabled" in rl_config:
+                    if rl_config["enabled"]:
+                        await webhook_rl.resume()
+                    else:
+                        await webhook_rl.pause()
+                    updated_configs.append("rate_limiter_enabled")
         
-        return {
-            "data": formatted_data,
-            "source": "database",
-            "hours_analyzed": hours,
-            "total_periods": len(formatted_data),
-            "timestamp": time.time()
-        }
+        _logger.info(f"System configuration updated: {', '.join(updated_configs)}")
         
     except Exception as e:
-        _logger.error(f"Error retrieving signals history: {e}")
-        # Return safe fallback instead of error
-        return {
-            "data": [],
-            "source": "error_fallback", 
-            "hours_analyzed": hours,
-            "error": f"Database error: {str(e)}",
-            "timestamp": time.time()
-        }
-
-# ---------------------------------------------------------------------------- #
-# Admin Status Endpoint                                                       #
-# ---------------------------------------------------------------------------- #
-
-@app.get("/admin/status")
-async def admin_status():
-    """Retorna métricas e informações do sistema para o painel admin."""
-    try:
-        metrics = get_current_metrics()
-        system_info = await get_system_info_data()
-        return {"metrics": metrics, "system_info": system_info}
-    except Exception as e:
-        _logger.error(f"Error in admin_status: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        _logger.error(f"Error updating system config: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating system config")
 
 # ---------------------------------------------------------------------------- #
 
