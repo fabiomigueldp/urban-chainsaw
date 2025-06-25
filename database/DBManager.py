@@ -445,13 +445,8 @@ class DBManager:
     ) -> int:
         """Conta os registros de auditoria com base nos filtros melhorados."""
         async with self.get_session() as session:
-            # Join signals and signal_events if we need ticker filtering
-            if ticker_filter:
-                query = select(func.count(Signal.signal_id.distinct())).select_from(
-                    Signal.join(SignalEvent, Signal.signal_id == SignalEvent.signal_id)
-                )
-            else:
-                query = select(func.count(Signal.signal_id))
+            # Base query - always use count on Signal table
+            query = select(func.count(Signal.signal_id))
             
             # Apply time filters (prefer hours if provided)
             if hours and not start_time:
@@ -466,6 +461,7 @@ class DBManager:
             if status_filter:
                 query = query.where(Signal.status == status_filter)
             if ticker_filter:
+                # Filter by ticker field in Signal table
                 query = query.where(Signal.ticker.ilike(f'%{ticker_filter}%'))
             
             result = await session.execute(query)
@@ -631,7 +627,8 @@ class DBManager:
                 return datetime.utcfromtimestamp(float(dt)).isoformat() + 'Z'
             except (ValueError, TypeError, OSError):
                 return str(dt) if dt else None
-        
+
+        # Primary signal data
         data = {
             "signal_id": str(signal.signal_id),
             "ticker": signal.ticker or '-',
@@ -644,6 +641,13 @@ class DBManager:
             "processing_time_ms": getattr(signal, 'processing_time_ms', None),
             "error_message": getattr(signal, 'error_message', None),
             "original_signal": getattr(signal, 'original_signal', None),
+            
+            # Add audit trail specific fields for compatibility
+            "event_type": getattr(signal, 'status', 'unknown'),
+            "location": self._derive_location_from_status(getattr(signal, 'status', '')),
+            "details": getattr(signal, 'error_message', None) or '-',
+            "worker_id": '-',
+            "http_status": None
         }
         
         if include_events and hasattr(signal, 'events'):
@@ -651,11 +655,13 @@ class DBManager:
             for event in sorted(signal.events, key=lambda e: getattr(e, 'timestamp', datetime.min)):
                 event_data = {
                     "timestamp": safe_datetime_format(getattr(event, 'timestamp', None)),
-                    "event_type": getattr(event, 'status', 'unknown'),  # Use status as event_type
+                    "event_type": getattr(event, 'status', 'unknown'),
                     "location": self._derive_location_from_status(getattr(event, 'status', '')),
                     "details": getattr(event, 'details', '') or '-',
                     "worker_id": getattr(event, 'worker_id', '') or '-',
                     "http_status": getattr(event, 'http_status', None),
+                    "signal_id": str(signal.signal_id),
+                    "ticker": signal.ticker or '-'
                 }
                 data["events"].append(event_data)
         return data

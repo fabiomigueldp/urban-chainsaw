@@ -835,7 +835,7 @@
         // Load system status
         async function loadSystemStatus() {
             try {
-                const response = await fetch('/admin/status');
+                const response = await fetch('/admin/system-info');
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -1419,7 +1419,7 @@
                 }
                 
                 // Load rate limiter config (from system status)
-                const statusResponse = await fetch('/admin/status');
+                const statusResponse = await fetch('/admin/system-info');
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
                     const rlInfo = statusData.system_info?.webhook_rate_limiter || {};

@@ -1563,12 +1563,39 @@ async def get_admin_audit_trail(
         _logger.info(f"Audit trail request - limit: {limit}, offset: {offset}, filters: {filters}")
         
         # Busca dados no banco
-        events = await db_manager.get_audit_trail(
+        signals = await db_manager.get_audit_trail(
             limit=limit, 
             offset=offset, 
             **filters
         )
         total = await db_manager.get_audit_trail_count(**filters)
+        
+        # Converter signals para eventos de auditoria
+        events = []
+        for signal in signals:
+            # Create main event from signal status
+            main_event = {
+                "timestamp": signal.get("updated_at") or signal.get("created_at"),
+                "signal_id": signal.get("signal_id", ""),
+                "ticker": signal.get("ticker", "-"),
+                "event_type": signal.get("status", "unknown"),
+                "location": signal.get("location", "unknown"),
+                "details": signal.get("error_message") or signal.get("details", "-"),
+                "worker_id": signal.get("worker_id", "-"),
+                "http_status": signal.get("http_status")
+            }
+            events.append(main_event)
+            
+            # Add individual events if available
+            if signal.get("events"):
+                for event in signal["events"]:
+                    events.append(event)
+        
+        # Sort events by timestamp (newest first)
+        events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        # Limit to requested amount
+        events = events[:limit]
         
         _logger.info(f"Audit trail response - events: {len(events)}, total: {total}")
         
