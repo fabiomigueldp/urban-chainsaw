@@ -576,10 +576,10 @@ class DBManager:
         """Constrói a lista de filtros SQLAlchemy a partir dos parâmetros de consulta."""
         filters = []
         if p.ticker:
+            # Only filter by ticker and normalised_ticker, NOT by signal_id to avoid UUID conversion errors
             filters.append(or_(
                 Signal.ticker.ilike(f"%{p.ticker}%"), 
-                Signal.normalised_ticker.ilike(f"%{p.ticker}%"), 
-                Signal.signal_id == p.ticker
+                Signal.normalised_ticker.ilike(f"%{p.ticker}%")
             ))
         if p.status and p.status != 'all':
             # Agora usando strings diretamente

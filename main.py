@@ -1659,7 +1659,7 @@ async def pause_webhook_rate_limiter(payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Webhook rate limiter not available")
     
     try:
-        await webhook_rl.pause()
+        webhook_rl.pause()  # Remove await - method is not async
         _logger.info("Webhook rate limiter paused via admin endpoint")
     except Exception as e:
         _logger.error(f"Error pausing webhook rate limiter: {e}")
@@ -1677,7 +1677,7 @@ async def resume_webhook_rate_limiter(payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Webhook rate limiter not available")
     
     try:
-        await webhook_rl.resume()
+        webhook_rl.resume()  # Remove await - method is not async
         _logger.info("Webhook rate limiter resumed via admin endpoint")
     except Exception as e:
         _logger.error(f"Error resuming webhook rate limiter: {e}")
@@ -1831,7 +1831,6 @@ async def update_system_config(payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating system config")
 
 # ---------------------------------------------------------------------------- #
-
 # Admin WebSocket Endpoint                                                    #
 # ---------------------------------------------------------------------------- #
 
@@ -1848,3 +1847,9 @@ async def admin_updates_ws(websocket: WebSocket):
     except Exception as e:
         _logger.error(f"WebSocket error: {e}")
         await comm_engine.remove_connection(websocket)
+
+# Add compatibility endpoint - redirects to system-info.
+@app.get("/admin/status")
+async def get_admin_status():
+    """Compatibility endpoint - redirects to system-info."""
+    return await get_system_info()

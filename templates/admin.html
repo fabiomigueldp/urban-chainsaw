@@ -1127,7 +1127,18 @@
             }
             
             const rows = data.events.map(event => {
-                const timestamp = new Date(event.timestamp).toLocaleString('pt-BR');
+                // Handle invalid timestamps more robustly
+                let timestamp = 'Invalid Date';
+                if (event.timestamp) {
+                    try {
+                        const date = new Date(event.timestamp);
+                        if (!isNaN(date.getTime())) {
+                            timestamp = date.toLocaleString('pt-BR');
+                        }
+                    } catch (e) {
+                        console.warn('Invalid timestamp format:', event.timestamp);
+                    }
+                }
                 const statusBadge = getStatusBadge(event.event_type);
                 const locationBadge = getLocationBadge(event.location);
                 const httpStatus = event.http_status || '-';
