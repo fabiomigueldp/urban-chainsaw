@@ -503,9 +503,37 @@
             </div>
         </div>
         
-        <!-- Sell All Management -->
+        <!-- Top-N Tickers List -->
         <div class="row mb-4">
-            <div class="col-12">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-star-fill"></i> Top-N Tickers Aprovados
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">Lista Atual (<span id="topNTickerCount">0</span> tickers):</h6>
+                            <button id="refreshTopNBtn" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-arrow-clockwise"></i> Atualizar
+                            </button>
+                        </div>
+                        <div id="topNTickers" class="mb-3" style="max-height: 200px; overflow-y: auto;">
+                            <span class="text-muted">Carregando...</span>
+                        </div>
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i> 
+                            Apenas sinais de tickers nesta lista serão aprovados e encaminhados
+                        </small>
+                        <div id="topNLastUpdate" class="mt-2">
+                            <small class="text-muted">Última atualização: <span id="topNTimestamp">-</span></small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <!-- Keep Sell All Management here -->
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
@@ -513,23 +541,19 @@
                         </h5>
                     </div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-8">
-                                <h6>Tickers na Lista Sell All:</h6>
-                                <div id="sellAllTickers" class="mb-3">
-                                    <span class="text-muted">Carregando...</span>
-                                </div>
+                        <div class="mb-3">
+                            <h6>Tickers na Lista Sell All:</h6>
+                            <div id="sellAllTickers" style="max-height: 150px; overflow-y: auto;">
+                                <span class="text-muted">Carregando...</span>
                             </div>
-                            <div class="col-md-4">
-                                <div class="d-grid gap-2">
-                                    <button id="executeSellAllBtn" class="btn btn-danger">
-                                        <i class="bi bi-exclamation-triangle"></i> Executar Sell All
-                                    </button>
-                                    <button id="refreshSellAllBtn" class="btn btn-outline-secondary">
-                                        <i class="bi bi-arrow-clockwise"></i> Atualizar Lista
-                                    </button>
-                                </div>
-                            </div>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button id="executeSellAllBtn" class="btn btn-danger">
+                                <i class="bi bi-exclamation-triangle"></i> Executar Sell All
+                            </button>
+                            <button id="refreshSellAllBtn" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-clockwise"></i> Atualizar Lista
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1071,6 +1095,57 @@
             container.innerHTML = tickersHtml;
         }
         
+        // Load top-N tickers list
+        async function loadTopNTickers() {
+            try {
+                const response = await fetch('/admin/top-n-tickers');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                
+                updateTopNTickers(data);
+                
+            } catch (error) {
+                console.error('Error loading top-N tickers:', error);
+                showAlert('Erro ao carregar lista de Top-N Tickers: ' + error.message, 'danger');
+            }
+        }
+        
+        // Update top-N tickers display
+        function updateTopNTickers(data) {
+            const container = document.getElementById('topNTickers');
+            const countDisplay = document.getElementById('topNTickerCount');
+            const timestampDisplay = document.getElementById('topNTimestamp');
+            
+            if (!data || !data.tickers || data.tickers.length === 0) {
+                container.innerHTML = '<span class="text-muted">Nenhum ticker aprovado</span>';
+                countDisplay.textContent = '0';
+                timestampDisplay.textContent = '-';
+                return;
+            }
+            
+            const tickersHtml = data.tickers.map(ticker => 
+                `<span class="sell-all-ticker">${ticker}</span>`
+            ).join('');
+            
+            container.innerHTML = tickersHtml;
+            countDisplay.textContent = data.tickers.length;
+            
+            // Update timestamp
+            if (data.last_update) {
+                const lastUpdateDate = new Date(data.last_update);
+                const options = { 
+                    year: 'numeric', month: 'numeric', day: 'numeric', 
+                    hour: 'numeric', minute: 'numeric', second: 'numeric', 
+                    hour12: false 
+                };
+                timestampDisplay.textContent = lastUpdateDate.toLocaleString('pt-BR', options);
+            } else {
+                timestampDisplay.textContent = '-';
+            }
+        }
+        
         // Load audit trail
         async function loadAuditTrail() {
             if (isLoading) return;
@@ -1226,6 +1301,9 @@
             // Sell all buttons
             document.getElementById('executeSellAllBtn').addEventListener('click', executeSellAll);
             document.getElementById('refreshSellAllBtn').addEventListener('click', loadSellAllList);
+            
+            // Top-N refresh button
+            document.getElementById('refreshTopNBtn').addEventListener('click', loadTopNTickers);
             
             // Audit trail controls
             document.getElementById('applyFiltersBtn').addEventListener('click', () => {

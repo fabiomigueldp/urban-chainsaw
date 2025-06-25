@@ -1853,3 +1853,37 @@ async def admin_updates_ws(websocket: WebSocket):
 async def get_admin_status():
     """Compatibility endpoint - redirects to system-info."""
     return await get_system_info()
+
+@app.get("/admin/top-n-tickers")
+async def get_top_n_tickers():
+    """Retorna a lista atual de tickers do Top-N aprovados pelo FinvizEngine."""
+    try:
+        current_tickers = await get_tickers_from_shared_state()
+        engine = shared_state.get("finviz_engine_instance")
+        
+        # Get additional engine info if available
+        engine_info = {}
+        if engine:
+            status_metrics = engine.get_status_metrics()
+            engine_info = {
+                "last_update": status_metrics.get("last_successful_update_time"),
+                "update_status": status_metrics.get("last_update_status", "Unknown"),
+                "total_collected": status_metrics.get("tickers_total_collected", 0),
+                "paused": engine.paused
+            }
+        
+        return {
+            "tickers": sorted(list(current_tickers)),
+            "count": len(current_tickers),
+            "timestamp": time.time(),
+            "engine_info": engine_info
+        }
+    except Exception as e:
+        _logger.error(f"Error getting top-N tickers: {e}")
+        return {
+            "tickers": [],
+            "count": 0,
+            "timestamp": time.time(),
+            "error": str(e),
+            "engine_info": {}
+        }
