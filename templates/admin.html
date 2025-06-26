@@ -598,6 +598,10 @@
                                     <input type="text" id="tickerFilter" class="form-control form-control-sm" placeholder="Ex: AAPL">
                                 </div>
                                 <div class="col-md-2">
+                                    <label for="signalIdFilter" class="form-label">Signal ID:</label>
+                                    <input type="text" id="signalIdFilter" class="form-control form-control-sm" placeholder="Ex: c88c6d90">
+                                </div>
+                                <div class="col-md-2">
                                     <label for="hourFilter" class="form-label">Últimas horas:</label>
                                     <select id="hourFilter" class="form-select form-select-sm">
                                         <option value="">Todas</option>
@@ -1215,6 +1219,7 @@
                 const limit = document.getElementById('limitSelect').value;
                 const status = document.getElementById('statusFilter').value;
                 const ticker = document.getElementById('tickerFilter').value;
+                const signalId = document.getElementById('signalIdFilter').value;
                 const hours = document.getElementById('hourFilter').value;
                 
                 params.append('limit', limit);
@@ -1222,6 +1227,7 @@
                 
                 if (status) params.append('status_filter', status);
                 if (ticker) params.append('ticker', ticker);
+                if (signalId) params.append('signal_id', signalId);
                 if (hours) params.append('hours', hours);
                 
                 const response = await fetch(`/admin/audit-trail?${params}`);
@@ -1265,6 +1271,21 @@
                                    new Date(event.timestamp * 1000);
                         } else if (typeof event.timestamp === 'string') {
                             // ISO string or other string format
+                            // Check if it's ISO format with Z suffix
+                            if (event.timestamp.includes('T')) {
+                                date = new Date(event.timestamp);
+                            } else {
+                                // Try parsing as Unix timestamp string
+                                const numTimestamp = parseFloat(event.timestamp);
+                                if (!isNaN(numTimestamp)) {
+                                    date = numTimestamp > 1000000000000 ? 
+                                           new Date(numTimestamp) : 
+                                           new Date(numTimestamp * 1000);
+                                } else {
+                                    date = new Date(event.timestamp);
+                                }
+                            }
+                        } else {
                             date = new Date(event.timestamp);
                         }
                         
@@ -1277,16 +1298,18 @@
                         }
                     } catch (e) {
                         console.warn('Invalid timestamp format:', event.timestamp, e);
+                        // Try to show the raw timestamp if parsing fails
+                        timestamp = String(event.timestamp);
                     }
                 }
                 
                 const statusBadge = getStatusBadge(event.event_type);
                 const locationBadge = getLocationBadge(event.location);
-                const httpStatus = event.http_status || '-';
+                const httpStatus = event.http_status || (event.http_status === 0 ? '0' : '-');
                 const details = event.details || '-';
                 const workerId = event.worker_id || '-';
                 const signalId = event.signal_id ? 
-                    (event.signal_id.length > 8 ? event.signal_id.substring(0, 8) + '...' : event.signal_id) : 
+                    event.signal_id : 
                     'N/A';
                 
                 return `
@@ -1477,6 +1500,7 @@
         function clearFilters() {
             document.getElementById('statusFilter').value = '';
             document.getElementById('tickerFilter').value = '';
+            document.getElementById('signalIdFilter').value = '';
             document.getElementById('hourFilter').value = '';
             currentPage = 1;
             loadAuditTrail();

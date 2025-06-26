@@ -15,7 +15,7 @@ from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime, timedelta
 import datetime as dt
 
-from sqlalchemy import select, func, and_, or_, desc, asc, text
+from sqlalchemy import select, func, and_, or_, desc, asc, text, String
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -404,6 +404,7 @@ class DBManager:
         offset: int = 0,
         status_filter: Optional[str] = None,
         ticker_filter: Optional[str] = None,
+        signal_id_filter: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         hours: Optional[int] = None,
@@ -422,6 +423,7 @@ class DBManager:
             page_size=limit,
             status=status_filter,
             ticker=ticker_filter,
+            signal_id=signal_id_filter,
             start_time=start_time.isoformat() + 'Z' if start_time else None,
             end_time=end_time.isoformat() + 'Z' if end_time else None,
             include_events=True,
@@ -437,6 +439,7 @@ class DBManager:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         signal_id: Optional[str] = None,
+        signal_id_filter: Optional[str] = None,
         event_types: Optional[List[str]] = None,
         status_filter: Optional[str] = None,
         ticker_filter: Optional[str] = None,
@@ -458,6 +461,9 @@ class DBManager:
                 query = query.where(Signal.created_at <= end_time)
             if signal_id:
                 query = query.where(Signal.signal_id == signal_id)
+            if signal_id_filter:
+                # Convert UUID to string for ILIKE search
+                query = query.where(Signal.signal_id.cast(String).ilike(f'%{signal_id_filter}%'))
             if status_filter:
                 query = query.where(Signal.status == status_filter)
             if ticker_filter:
@@ -581,6 +587,9 @@ class DBManager:
                 Signal.ticker.ilike(f"%{p.ticker}%"), 
                 Signal.normalised_ticker.ilike(f"%{p.ticker}%")
             ))
+        if p.signal_id:
+            # Convert UUID to string for ILIKE search
+            filters.append(Signal.signal_id.cast(String).ilike(f"%{p.signal_id}%"))
         if p.status and p.status != 'all':
             # Agora usando strings diretamente
             filters.append(Signal.status == p.status)
@@ -621,12 +630,31 @@ class DBManager:
             """Safely format datetime to ISO string."""
             if dt is None:
                 return None
+            
+            # If it's already a datetime object with timezone info
             if hasattr(dt, 'isoformat'):
-                return dt.isoformat() + 'Z'
+                try:
+                    # If it has timezone info, format correctly
+                    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+                        return dt.isoformat()
+                    else:
+                        # Assume UTC if no timezone info
+                        return dt.isoformat() + 'Z'
+                except:
+                    pass
+            
+            # Try to convert from timestamp
             try:
-                return datetime.utcfromtimestamp(float(dt)).isoformat() + 'Z'
+                timestamp_float = float(dt)
+                # Check if it's in milliseconds (very large number) or seconds
+                if timestamp_float > 1000000000000:  # Milliseconds
+                    timestamp_float = timestamp_float / 1000
+                return datetime.utcfromtimestamp(timestamp_float).isoformat() + 'Z'
             except (ValueError, TypeError, OSError):
-                return str(dt) if dt else None
+                pass
+            
+            # Last resort - convert to string
+            return str(dt) if dt else None
 
         # Primary signal data
         data = {

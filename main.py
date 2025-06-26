@@ -212,7 +212,7 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
             # Log processing event to database
             try:                await db_manager.log_signal_event(
                     signal_id=signal_id,
-                    event_type="PROCESSING",
+                    event_type=SignalStatusEnum.PROCESSING,
                     details="Signal being processed by worker",
                     worker_id=f"queue_worker_{worker_id}"
                 )
@@ -233,7 +233,7 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
                       # Log approval event to database
                     try:                        await db_manager.log_signal_event(
                             signal_id=signal_id,
-                            event_type="APPROVED",
+                            event_type=SignalStatusEnum.APPROVED,
                             details=f"Signal approved - ticker {normalised_ticker} found in top-{len(current_tickers)} list",
                             worker_id=f"queue_worker_{worker_id}"
                         )
@@ -1547,7 +1547,8 @@ async def get_admin_audit_trail(
     offset: int = 0, 
     status_filter: str = None, 
     ticker: str = None, 
-    hours: int = None
+    hours: int = None,
+    signal_id: str = None
 ):
     """Retorna eventos de auditoria para o painel admin com filtros melhorados."""
     try:
@@ -1559,6 +1560,8 @@ async def get_admin_audit_trail(
             filters['ticker_filter'] = ticker
         if hours:
             filters['hours'] = hours
+        if signal_id:
+            filters['signal_id_filter'] = signal_id
             
         _logger.info(f"Audit trail request - limit: {limit}, offset: {offset}, filters: {filters}")
         
@@ -1589,7 +1592,29 @@ async def get_admin_audit_trail(
             # Add individual events if available
             if signal.get("events"):
                 for event in signal["events"]:
-                    events.append(event)
+                    # Ensure proper timestamp format
+                    event_timestamp = event.get("timestamp") or event.get("created_at")
+                    if isinstance(event_timestamp, str):
+                        # If it's already a string, keep it
+                        formatted_timestamp = event_timestamp
+                    elif hasattr(event_timestamp, 'isoformat'):
+                        # If it's a datetime object, convert to ISO format
+                        formatted_timestamp = event_timestamp.isoformat()
+                    else:
+                        # If it's something else, convert to string
+                        formatted_timestamp = str(event_timestamp) if event_timestamp else None
+                    
+                    processed_event = {
+                        "timestamp": formatted_timestamp,
+                        "signal_id": event.get("signal_id", signal.get("signal_id", "")),
+                        "ticker": event.get("ticker", signal.get("ticker", "-")),
+                        "event_type": event.get("status", event.get("event_type", "unknown")),
+                        "location": event.get("location", "unknown"),
+                        "details": event.get("details", "-"),
+                        "worker_id": event.get("worker_id", "-"),
+                        "http_status": event.get("http_status")
+                    }
+                    events.append(processed_event)
         
         # Sort events by timestamp (newest first)
         events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
