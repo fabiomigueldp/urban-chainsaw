@@ -847,6 +847,9 @@
                 // Load sell all list
                 await loadSellAllList();
                 
+                // Load top-N tickers list
+                await loadTopNTickers();
+                
                 // Load audit trail
                 await loadAuditTrail();
                 
@@ -1132,17 +1135,64 @@
             container.innerHTML = tickersHtml;
             countDisplay.textContent = data.tickers.length;
             
-            // Update timestamp
-            if (data.last_update) {
-                const lastUpdateDate = new Date(data.last_update);
-                const options = { 
-                    year: 'numeric', month: 'numeric', day: 'numeric', 
-                    hour: 'numeric', minute: 'numeric', second: 'numeric', 
-                    hour12: false 
-                };
-                timestampDisplay.textContent = lastUpdateDate.toLocaleString('pt-BR', options);
+            // Update timestamp - try multiple possible timestamp fields
+            const timestampFields = ['last_update', 'timestamp', 'engine_info.last_update'];
+            let timestampValue = null;
+            
+            for (const field of timestampFields) {
+                if (field.includes('.')) {
+                    // Handle nested properties like engine_info.last_update
+                    const parts = field.split('.');
+                    let value = data;
+                    for (const part of parts) {
+                        if (value && value[part] !== undefined) {
+                            value = value[part];
+                        } else {
+                            value = null;
+                            break;
+                        }
+                    }
+                    if (value) {
+                        timestampValue = value;
+                        break;
+                    }
+                } else {
+                    if (data[field]) {
+                        timestampValue = data[field];
+                        break;
+                    }
+                }
+            }
+            
+            if (timestampValue) {
+                try {
+                    // Handle both Unix timestamp (seconds) and ISO strings
+                    let date;
+                    if (typeof timestampValue === 'number') {
+                        // Unix timestamp - might be in seconds or milliseconds
+                        date = timestampValue > 1000000000000 ? 
+                               new Date(timestampValue) : 
+                               new Date(timestampValue * 1000);
+                    } else {
+                        date = new Date(timestampValue);
+                    }
+                    
+                    if (!isNaN(date.getTime())) {
+                        const options = { 
+                            year: 'numeric', month: 'numeric', day: 'numeric', 
+                            hour: 'numeric', minute: 'numeric', second: 'numeric', 
+                            hour12: false 
+                        };
+                        timestampDisplay.textContent = date.toLocaleString('pt-BR', options);
+                    } else {
+                        timestampDisplay.textContent = 'Data inválida';
+                    }
+                } catch (e) {
+                    console.warn('Error parsing timestamp:', timestampValue, e);
+                    timestampDisplay.textContent = 'Erro na data';
+                }
             } else {
-                timestampDisplay.textContent = '-';
+                timestampDisplay.textContent = 'Agora';
             }
         }
         
@@ -1203,27 +1253,46 @@
             
             const rows = data.events.map(event => {
                 // Handle invalid timestamps more robustly
-                let timestamp = 'Invalid Date';
+                let timestamp = 'Data inválida';
                 if (event.timestamp) {
                     try {
-                        const date = new Date(event.timestamp);
-                        if (!isNaN(date.getTime())) {
-                            timestamp = date.toLocaleString('pt-BR');
+                        let date;
+                        // Handle different timestamp formats
+                        if (typeof event.timestamp === 'number') {
+                            // Unix timestamp - check if it's in seconds or milliseconds
+                            date = event.timestamp > 1000000000000 ? 
+                                   new Date(event.timestamp) : 
+                                   new Date(event.timestamp * 1000);
+                        } else if (typeof event.timestamp === 'string') {
+                            // ISO string or other string format
+                            date = new Date(event.timestamp);
+                        }
+                        
+                        if (date && !isNaN(date.getTime())) {
+                            timestamp = date.toLocaleString('pt-BR', {
+                                year: 'numeric', month: '2-digit', day: '2-digit',
+                                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                                hour12: false
+                            });
                         }
                     } catch (e) {
-                        console.warn('Invalid timestamp format:', event.timestamp);
+                        console.warn('Invalid timestamp format:', event.timestamp, e);
                     }
                 }
+                
                 const statusBadge = getStatusBadge(event.event_type);
                 const locationBadge = getLocationBadge(event.location);
                 const httpStatus = event.http_status || '-';
                 const details = event.details || '-';
                 const workerId = event.worker_id || '-';
+                const signalId = event.signal_id ? 
+                    (event.signal_id.length > 8 ? event.signal_id.substring(0, 8) + '...' : event.signal_id) : 
+                    'N/A';
                 
                 return `
                     <tr>
                         <td>${timestamp}</td>
-                        <td><code>${event.signal_id.substring(0, 8)}...</code></td>
+                        <td><code>${signalId}</code></td>
                         <td><strong>${event.ticker || '-'}</strong></td>
                         <td>${statusBadge}</td>
                         <td>${locationBadge}</td>

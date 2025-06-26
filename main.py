@@ -1869,12 +1869,13 @@ async def get_top_n_tickers():
                 "last_update": status_metrics.get("last_successful_update_time"),
                 "update_status": status_metrics.get("last_update_status", "Unknown"),
                 "total_collected": status_metrics.get("tickers_total_collected", 0),
-                "paused": engine.paused
+                "paused": engine.is_paused()
             }
         
         return {
             "tickers": sorted(list(current_tickers)),
             "count": len(current_tickers),
+            "last_update": time.time(),
             "timestamp": time.time(),
             "engine_info": engine_info
         }
@@ -1883,6 +1884,7 @@ async def get_top_n_tickers():
         return {
             "tickers": [],
             "count": 0,
+            "last_update": time.time(),
             "timestamp": time.time(),
             "error": str(e),
             "engine_info": {}
