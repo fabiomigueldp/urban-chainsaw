@@ -198,6 +198,7 @@ shared_state: Dict[str, Any] = {
     "webhook_rate_limiter_instance": None, # To hold the WebhookRateLimiter instance
     "signal_metrics": signal_metrics,
     "sell_all_accumulator": set(),
+    "signal_trackers": {},  # Initialize signal trackers dictionary
 }
 
 # ---------------------------------------------------------------------------- #
@@ -1478,22 +1479,9 @@ async def sell_individual_order(payload: SellIndividualPayload):
         _logger.error(f"Error creating signal in database: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating signal: {str(e)}")
 
-    # Create signal tracker for administrative signals (legacy compatibility)
-    tracker = create_signal_tracker(signal_to_queue)
-    shared_state["signal_trackers"][signal_to_queue.signal_id] = tracker
-    
     # Update metrics
     shared_state["signal_metrics"]["signals_received"] += 1
     
-    # Update tracker - signal approved via admin interface
-    update_signal_tracker(
-        signal_to_queue.signal_id,
-        SignalStatus.APPROVED,
-        SignalLocation.APPROVED_QUEUE,
-        worker_id='admin_sell_individual',
-        details="Signal approved via admin sell-individual interface"
-    )
-
     # Prepare data for the queue (similar to _queue_worker)
     approved_signal_data = {
         'signal': signal_to_queue,
@@ -1508,19 +1496,7 @@ async def sell_individual_order(payload: SellIndividualPayload):
         await approved_signal_queue.put(approved_signal_data)
         _logger.info(f"Sell signal for {payload.ticker} added to approved_signal_queue.")
         
-        # Update tracker - signal queued for forwarding
-        update_signal_tracker(
-            signal_to_queue.signal_id,
-            SignalStatus.QUEUED_FORWARDING,
-            SignalLocation.APPROVED_QUEUE,
-            worker_id='admin_sell_individual',
-            details="Signal queued for forwarding via admin interface"
-        )
-
-        # Broadcast tracker update
-        await broadcast_signal_tracker_update(tracker)
-
-        # Update shared_state['sell_all_accumulator']
+        # Update shared_state['sell_all_accumulator'] - this ticker was sold individually
         shared_state['sell_all_accumulator'].add(payload.ticker.strip().upper())
         
         return {"message": f"Sell signal for {payload.ticker} queued successfully", "signal_id": signal_to_queue.signal_id}
@@ -1552,10 +1528,9 @@ async def sell_all_orders(payload: TokenPayload):
                     side='sell',
                     action='sell',
                     price=None,
-                    time=datetime.utcnow().isoformat() + 'Z'
+                    time=datetime.datetime.now(datetime.timezone.utc).isoformat() + 'Z'
                 )
-                
-                # Create signal in database with correct type
+                  # Create signal in database with correct type
                 from database.simple_models import SignalTypeEnum
                 try:
                     signal_id = await db_manager.create_signal_with_initial_event(signal_to_queue, SignalTypeEnum.SELL_ALL)
@@ -1563,10 +1538,6 @@ async def sell_all_orders(payload: TokenPayload):
                 except Exception as db_error:
                     _logger.error(f"Error creating sell-all signal in database: {db_error}")
                     continue
-                
-                # Create tracker for this signal (legacy compatibility)
-                tracker = create_signal_tracker(signal_to_queue)
-                shared_state["signal_trackers"][signal_to_queue.signal_id] = tracker
                 
                 # Prepare data for approved queue
                 approved_signal_data = {
@@ -1579,15 +1550,6 @@ async def sell_all_orders(payload: TokenPayload):
                 
                 # Add to approved queue
                 await approved_signal_queue.put(approved_signal_data)
-                
-                # Update tracker
-                update_signal_tracker(
-                    signal_to_queue.signal_id,
-                    SignalStatus.QUEUED_FORWARDING,
-                    SignalLocation.APPROVED_QUEUE,
-                    worker_id='admin_sell_all',
-                    details=f"Sell-all signal queued for {ticker}"
-                )
                 
                 processed_tickers.append(ticker)
                 _logger.info(f"Sell-all signal queued for {ticker}")
@@ -1742,7 +1704,8 @@ async def get_admin_audit_trail(
                 "location": signal.get("location", "unknown"),
                 "details": signal.get("error_message") or signal.get("details", "-"),
                 "worker_id": signal.get("worker_id", "-"),
-                "http_status": signal.get("http_status")
+                "http_status": signal.get("http_status"),
+                "signal_type": signal.get("signal_type", "buy")  # Add signal_type
             }
             events.append(main_event)
             
@@ -1769,7 +1732,8 @@ async def get_admin_audit_trail(
                         "location": event.get("location", "unknown"),
                         "details": event.get("details", "-"),
                         "worker_id": event.get("worker_id", "-"),
-                        "http_status": event.get("http_status")
+                        "http_status": event.get("http_status"),
+                        "signal_type": event.get("signal_type", signal.get("signal_type", "buy"))  # Add signal_type
                     }
                     events.append(processed_event)
         

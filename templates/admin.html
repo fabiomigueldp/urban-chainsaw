@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -158,6 +158,19 @@
             display: inline-block;
         }
         
+        .clickable-ticker {
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+        
+        .clickable-ticker:hover {
+            background-color: #007bff;
+            color: white;
+            border-color: #0056b3;
+            transform: translateY(-1px);
+        }
+        
         .top-n-ticker {
             margin: 2px;
             padding: 4px 8px;
@@ -188,7 +201,7 @@
     <!-- Connection Status Alert -->
     <div id="connectionStatus" class="connection-status">
         <div class="alert alert-info alert-dismissible" role="alert">
-            <i class="bi bi-wifi"></i> Conectando ao servidor...
+            <i class="bi bi-wifi"></i> Connecting to server...
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
     </div>
@@ -206,7 +219,7 @@
             <div class="navbar-nav ms-auto">
                 <span class="navbar-text">
                     <span id="connectionIndicator" class="status-indicator status-offline"></span>
-                    <span id="connectionText">Desconectado</span>
+                    <span id="connectionText">Disconnected</span>
                 </span>
             </div>
         </div>
@@ -220,8 +233,8 @@
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-primary" id="signalsReceived">-</div>
-                        <div class="metric-label">Sinais Recebidos</div>
-                        <small class="text-muted">Total desde início</small>
+                        <div class="metric-label">Signals Received</div>
+                        <small class="text-muted">Total since start</small>
                     </div>
                 </div>
             </div>
@@ -238,8 +251,8 @@
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-warning" id="signalsRejected">-</div>
-                        <div class="metric-label">Sinais Rejeitados</div>
-                        <small class="text-muted">Não passou no filtro</small>
+                        <div class="metric-label">Signals Rejected</div>
+                        <small class="text-muted">Did not pass filter</small>
                     </div>
                 </div>
             </div>
@@ -247,8 +260,8 @@
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-info" id="signalsForwarded">-</div>
-                        <div class="metric-label">Sinais Encaminhados</div>
-                        <small class="text-muted">Enviados com sucesso</small>
+                        <div class="metric-label">Signals Forwarded</div>
+                        <small class="text-muted">Successfully sent</small>
                     </div>
                 </div>
             </div>
@@ -260,23 +273,23 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-queue"></i> Status das Filas
+                            <i class="bi bi-queue"></i> Queue Status
                         </h5>
                     </div>
                     <div class="card-body">
                         <div class="row text-center">
                             <div class="col-6">
                                 <div class="metric-value text-primary" id="processingQueueSize">-</div>
-                                <div class="metric-label">Fila de Processamento</div>
+                                <div class="metric-label">Processing Queue</div>
                             </div>
                             <div class="col-6">
                                 <div class="metric-value text-warning" id="approvedQueueSize">-</div>
-                                <div class="metric-label">Fila de Encaminhamento</div>
+                                <div class="metric-label">Forwarding Queue</div>
                             </div>
                         </div>
                         <div class="progress-container">
                             <div class="d-flex justify-content-between small">
-                                <span>Workers Ativos:</span>
+                                <span>Active Workers:</span>
                                 <span id="forwardingWorkersActive">-</span>
                             </div>
                             <div class="progress">
@@ -290,7 +303,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-info-circle"></i> Sistema
+                            <i class="bi bi-info-circle"></i> System
                         </h5>
                     </div>
                     <div class="card-body">
@@ -307,7 +320,7 @@
                         <hr>
                         <div class="row">
                             <div class="col-6">
-                                <strong>Tickers Top-N:</strong><br>
+                                <strong>Top-N Tickers:</strong><br>
                                 <span id="tickerCount">-</span>
                             </div>
                             <div class="col-6">
@@ -326,7 +339,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-bar-chart"></i> Sinais por Hora
+                            <i class="bi bi-bar-chart"></i> Signals per Hour
                         </h5>
                     </div>
                     <div class="card-body">
@@ -340,7 +353,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-pie-chart"></i> Taxa de Aprovação
+                            <i class="bi bi-pie-chart"></i> Approval Rate
                         </h5>
                     </div>
                     <div class="card-body">
@@ -358,28 +371,28 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-gear"></i> Controles do Sistema
+                            <i class="bi bi-gear"></i> System Controls
                         </h5>
                     </div>
                     <div class="card-body">
                         <div class="action-buttons">
                             <button id="pauseEngineBtn" class="btn btn-warning">
-                                <i class="bi bi-pause"></i> Pausar Engine
+                                <i class="bi bi-pause"></i> Pause Engine
                             </button>
                             <button id="resumeEngineBtn" class="btn btn-success">
-                                <i class="bi bi-play"></i> Retomar Engine
+                                <i class="bi bi-play"></i> Resume Engine
                             </button>
                             <button id="refreshEngineBtn" class="btn btn-info">
-                                <i class="bi bi-arrow-clockwise refresh-btn"></i> Atualizar Tickers
+                                <i class="bi bi-arrow-clockwise refresh-btn"></i> Refresh Tickers
                             </button>
                             <button id="resetMetricsBtn" class="btn btn-secondary">
-                                <i class="bi bi-arrow-counterclockwise"></i> Resetar Métricas
+                                <i class="bi bi-arrow-counterclockwise"></i> Reset Metrics
                             </button>
                             <button id="pauseRateLimiterBtn" class="btn btn-warning">
-                                <i class="bi bi-pause"></i> Pausar Rate Limiter
+                                <i class="bi bi-pause"></i> Pause Rate Limiter
                             </button>
                             <button id="resumeRateLimiterBtn" class="btn btn-success">
-                                <i class="bi bi-play"></i> Retomar Rate Limiter
+                                <i class="bi bi-play"></i> Resume Rate Limiter
                             </button>
                         </div>
                     </div>
@@ -389,15 +402,15 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-gear-fill"></i> Configurações
+                            <i class="bi bi-gear-fill"></i> Configuration
                         </h5>
                     </div>
                     <div class="card-body">
                         <button id="openConfigBtn" class="btn btn-primary w-100 mb-2">
-                            <i class="bi bi-sliders"></i> Abrir Painel de Configurações
+                            <i class="bi bi-sliders"></i> Open Configuration Panel
                         </button>
                         <button id="setTokenBtn" class="btn btn-outline-secondary w-100">
-                            <i class="bi bi-key"></i> Configurar Token Admin
+                            <i class="bi bi-key"></i> Set Admin Token
                         </button>
                     </div>
                 </div>
@@ -410,7 +423,7 @@
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title" id="configModalLabel">
-                            <i class="bi bi-gear-fill"></i> Configurações do Sistema
+                            <i class="bi bi-gear-fill"></i> System Configuration
                         </h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
@@ -420,19 +433,19 @@
                             <div class="col-md-6 mb-3">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h6 class="mb-0"><i class="bi bi-send"></i> Webhook de Destino</h6>
+                                        <h6 class="mb-0"><i class="bi bi-send"></i> Target Webhook</h6>
                                     </div>
                                     <div class="card-body">
                                         <div class="mb-3">
-                                            <label for="webhookUrl" class="form-label">URL do Webhook:</label>
+                                            <label for="webhookUrl" class="form-label">Webhook URL:</label>
                                             <input type="url" id="webhookUrl" class="form-control" placeholder="https://webhook.example.com/endpoint">
                                         </div>
                                         <div class="mb-3">
-                                            <label for="webhookTimeout" class="form-label">Timeout (segundos):</label>
+                                            <label for="webhookTimeout" class="form-label">Timeout (seconds):</label>
                                             <input type="number" id="webhookTimeout" class="form-control" value="5" min="1" max="60">
                                         </div>
                                         <button id="updateWebhookBtn" class="btn btn-primary btn-sm">
-                                            <i class="bi bi-check"></i> Atualizar Webhook
+                                            <i class="bi bi-check"></i> Update Webhook
                                         </button>
                                     </div>
                                 </div>
@@ -442,11 +455,11 @@
                             <div class="col-md-6 mb-3">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h6 class="mb-0"><i class="bi bi-graph-up"></i> Configurações Finviz</h6>
+                                        <h6 class="mb-0"><i class="bi bi-graph-up"></i> Finviz Configuration</h6>
                                     </div>
                                     <div class="card-body">
                                         <div class="mb-3">
-                                            <label for="finvizUrl" class="form-label">URL do Finviz:</label>
+                                            <label for="finvizUrl" class="form-label">Finviz URL:</label>
                                             <input type="url" id="finvizUrl" class="form-control">
                                         </div>
                                         <div class="mb-3">
@@ -454,11 +467,11 @@
                                             <input type="number" id="topN" class="form-control" value="15" min="1" max="1000">
                                         </div>
                                         <div class="mb-3">
-                                            <label for="refreshInterval" class="form-label">Intervalo de Atualização (seg):</label>
+                                            <label for="refreshInterval" class="form-label">Refresh Interval (sec):</label>
                                             <input type="number" id="refreshInterval" class="form-control" value="10" min="5" max="3600">
                                         </div>
                                         <button id="updateFinvizBtn" class="btn btn-primary btn-sm">
-                                            <i class="bi bi-check"></i> Atualizar Finviz
+                                            <i class="bi bi-check"></i> Update Finviz
                                         </button>
                                     </div>
                                 </div>
@@ -472,17 +485,17 @@
                                     </div>
                                     <div class="card-body">
                                         <div class="mb-3">
-                                            <label for="maxReqPerMin" class="form-label">Máx Req/Min:</label>
+                                            <label for="maxReqPerMin" class="form-label">Max Req/Min:</label>
                                             <input type="number" id="maxReqPerMin" class="form-control" value="60" min="1" max="1000">
                                         </div>
                                         <div class="form-check mb-3">
                                             <input class="form-check-input" type="checkbox" id="rateLimitingEnabled" checked>
                                             <label class="form-check-label" for="rateLimitingEnabled">
-                                                Rate Limiting Habilitado
+                                                Rate Limiting Enabled
                                             </label>
                                         </div>
                                         <button id="updateRateLimiterBtn" class="btn btn-primary btn-sm">
-                                            <i class="bi bi-check"></i> Atualizar Rate Limiter
+                                            <i class="bi bi-check"></i> Update Rate Limiter
                                         </button>
                                     </div>
                                 </div>
@@ -492,26 +505,26 @@
                             <div class="col-md-6 mb-3">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h6 class="mb-0"><i class="bi bi-key"></i> Token de Administração</h6>
+                                        <h6 class="mb-0"><i class="bi bi-key"></i> Administration Token</h6>
                                     </div>
                                     <div class="card-body">
                                         <div class="mb-3">
-                                            <label for="adminToken" class="form-label">Token Atual:</label>
+                                            <label for="adminToken" class="form-label">Current Token:</label>
                                             <div class="input-group">
-                                                <input type="password" id="adminToken" class="form-control" placeholder="Digite o token">
+                                                <input type="password" id="adminToken" class="form-control" placeholder="Enter the token">
                                                 <button class="btn btn-outline-secondary" type="button" id="toggleTokenVisibility">
                                                     <i class="bi bi-eye"></i>
                                                 </button>
                                             </div>
                                         </div>
                                         <div class="alert alert-info small">
-                                            <i class="bi bi-info-circle"></i> Token será salvo no navegador para uso automático
+                                            <i class="bi bi-info-circle"></i> Token will be saved in browser for automatic use
                                         </div>
                                         <button id="saveTokenBtn" class="btn btn-success btn-sm">
-                                            <i class="bi bi-save"></i> Salvar Token
+                                            <i class="bi bi-save"></i> Save Token
                                         </button>
                                         <button id="clearTokenBtn" class="btn btn-outline-danger btn-sm">
-                                            <i class="bi bi-trash"></i> Limpar Token
+                                            <i class="bi bi-trash"></i> Clear Token
                                         </button>
                                     </div>
                                 </div>
@@ -519,9 +532,9 @@
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                         <button type="button" class="btn btn-primary" id="loadCurrentConfigBtn">
-                            <i class="bi bi-arrow-clockwise"></i> Carregar Configuração Atual
+                            <i class="bi bi-arrow-clockwise"></i> Load Current Configuration
                         </button>
                     </div>
                 </div>
@@ -620,7 +633,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-journal-text"></i> Trilha de Auditoria
+                            <i class="bi bi-journal-text"></i> Audit Trail
                         </h5>
                     </div>
                     <div class="card-body">
@@ -628,7 +641,7 @@
                         <div class="filter-card p-3 mb-3">
                             <div class="row">
                                 <div class="col-md-2">
-                                    <label for="limitSelect" class="form-label">Limite:</label>
+                                    <label for="limitSelect" class="form-label">Limit:</label>
                                     <select id="limitSelect" class="form-select form-select-sm">
                                         <option value="100">100</option>
                                         <option value="500">500</option>
@@ -638,19 +651,19 @@
                                 <div class="col-md-2">
                                     <label for="statusFilter" class="form-label">Status:</label>
                                     <select id="statusFilter" class="form-select form-select-sm">
-                                        <option value="">Todos</option>
-                                        <option value="RECEIVED">Recebido</option>
-                                        <option value="APPROVED">Aprovado</option>
-                                        <option value="REJECTED">Rejeitado</option>
-                                        <option value="FORWARDED_SUCCESS">Encaminhado</option>
-                                        <option value="FORWARDED_HTTP_ERROR">Erro HTTP</option>
-                                        <option value="ERROR">Erro</option>
+                                        <option value="">All</option>
+                                        <option value="RECEIVED">Received</option>
+                                        <option value="APPROVED">Approved</option>
+                                        <option value="REJECTED">Rejected</option>
+                                        <option value="FORWARDED_SUCCESS">Forwarded</option>
+                                        <option value="FORWARDED_HTTP_ERROR">HTTP Error</option>
+                                        <option value="ERROR">Error</option>
                                     </select>
                                 </div>
                                 <div class="col-md-2">
-                                    <label for="signalTypeFilter" class="form-label">Tipo:</label>
+                                    <label for="signalTypeFilter" class="form-label">Type:</label>
                                     <select id="signalTypeFilter" class="form-select form-select-sm">
-                                        <option value="">Todos</option>
+                                        <option value="">All</option>
                                         <option value="buy">Buy</option>
                                         <option value="sell">Sell</option>
                                         <option value="manual_sell">Manual Sell</option>
@@ -659,20 +672,20 @@
                                 </div>
                                 <div class="col-md-2">
                                     <label for="tickerFilter" class="form-label">Ticker:</label>
-                                    <input type="text" id="tickerFilter" class="form-control form-control-sm" placeholder="Ex: AAPL">
+                                    <input type="text" id="tickerFilter" class="form-control form-control-sm" placeholder="e.g., AAPL">
                                 </div>
                                 <div class="col-md-2">
                                     <label for="signalIdFilter" class="form-label">Signal ID:</label>
-                                    <input type="text" id="signalIdFilter" class="form-control form-control-sm" placeholder="Ex: c88c6d90">
+                                    <input type="text" id="signalIdFilter" class="form-control form-control-sm" placeholder="e.g., c88c6d90">
                                 </div>
                                 <div class="col-md-2">
-                                    <label for="hourFilter" class="form-label">Últimas horas:</label>
+                                    <label for="hourFilter" class="form-label">Last hours:</label>
                                     <select id="hourFilter" class="form-select form-select-sm">
-                                        <option value="">Todas</option>
-                                        <option value="1">1 hora</option>
-                                        <option value="6">6 horas</option>
-                                        <option value="24">24 horas</option>
-                                        <option value="168">7 dias</option>
+                                        <option value="">All</option>
+                                        <option value="1">1 hour</option>
+                                        <option value="6">6 hours</option>
+                                        <option value="24">24 hours</option>
+                                        <option value="168">7 days</option>
                                     </select>
                                 </div>
                             </div>
@@ -681,7 +694,7 @@
                                     <label class="form-label">&nbsp;</label>
                                     <div class="d-grid">
                                         <button id="applyFiltersBtn" class="btn btn-primary btn-sm">
-                                            <i class="bi bi-funnel"></i> Filtrar
+                                            <i class="bi bi-funnel"></i> Filter
                                         </button>
                                     </div>
                                 </div>
@@ -689,7 +702,7 @@
                                     <label class="form-label">&nbsp;</label>
                                     <div class="d-grid">
                                         <button id="clearFiltersBtn" class="btn btn-outline-secondary btn-sm">
-                                            <i class="bi bi-x-circle"></i> Limpar
+                                            <i class="bi bi-x-circle"></i> Clear
                                         </button>
                                     </div>
                                 </div>
@@ -704,11 +717,11 @@
                                         <th>Timestamp</th>
                                         <th>Signal ID</th>
                                         <th>Ticker</th>
-                                        <th>Tipo</th>
+                                        <th>Type</th>
                                         <th>Status</th>
-                                        <th>Localização</th>
+                                        <th>Location</th>
                                         <th>Worker</th>
-                                        <th>Detalhes</th>
+                                        <th>Details</th>
                                         <th>HTTP</th>
                                     </tr>
                                 </thead>
@@ -716,9 +729,9 @@
                                     <tr>
                                         <td colspan="9" class="text-center">
                                             <div class="loading-spinner spinner-border" role="status">
-                                                <span class="visually-hidden">Carregando...</span>
+                                                <span class="visually-hidden">Loading...</span>
                                             </div>
-                                            Carregando dados da auditoria...
+                                            Loading audit data...
                                         </td>
                                     </tr>
                                 </tbody>
@@ -732,11 +745,11 @@
                             </div>
                             <div>
                                 <button id="prevPageBtn" class="btn btn-outline-secondary btn-sm me-2" disabled>
-                                    <i class="bi bi-chevron-left"></i> Anterior
+                                    <i class="bi bi-chevron-left"></i> Previous
                                 </button>
-                                <span id="pageInfo" class="mx-2">Página 1</span>
+                                <span id="pageInfo" class="mx-2">Page 1</span>
                                 <button id="nextPageBtn" class="btn btn-outline-secondary btn-sm ms-2" disabled>
-                                    Próxima <i class="bi bi-chevron-right"></i>
+                                    Next <i class="bi bi-chevron-right"></i>
                                 </button>
                             </div>
                         </div>
@@ -827,7 +840,7 @@
                 case 'metrics_reset':
                     // Handle metrics reset
                     updateMetrics(data.data);
-                    showAlert('Métricas foram resetadas com sucesso', 'info');
+                    showAlert('Metrics reset successfully', 'info');
                     break;
                 case 'top_n_tickers_update':
                     updateTopNTickers(data.data);
@@ -845,11 +858,11 @@
             
             if (connected) {
                 indicator.className = 'status-indicator status-online';
-                text.textContent = 'Conectado';
+                text.textContent = 'Connected';
                 statusAlert.style.display = 'none';
             } else {
                 indicator.className = 'status-indicator status-offline';
-                text.textContent = 'Desconectado';
+                text.textContent = 'Disconnected';
                 statusAlert.style.display = 'block';
             }
         }
@@ -863,7 +876,7 @@
                 data: {
                     labels: [],
                     datasets: [{
-                        label: 'Sinais Recebidos',
+                        label: 'Signals Received',
                         data: [],
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
@@ -886,7 +899,7 @@
             approvalChart = new Chart(approvalCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Aprovados', 'Rejeitados'],
+                    labels: ['Approved', 'Rejected'],
                     datasets: [{
                         data: [0, 0],
                         backgroundColor: [
@@ -929,7 +942,7 @@
                 
             } catch (error) {
                 console.error('Error loading initial data:', error);
-                showAlert('Erro ao carregar dados iniciais', 'danger');
+                showAlert('Error loading initial data', 'danger');
             }
         }
         
@@ -948,7 +961,7 @@
                 
             } catch (error) {
                 console.error('Error loading system status:', error);
-                showAlert('Erro ao carregar status do sistema: ' + error.message, 'warning');
+                showAlert('Error loading system status: ' + error.message, 'warning');
             }
         }
         
@@ -989,10 +1002,10 @@
                 
                 if (total > 0) {
                     const approvalRate = ((approved / total) * 100).toFixed(1);
-                    approvalNote.textContent = `📊 Taxa de aprovação: ${approvalRate}% (${approved}/${total})`;
+                    approvalNote.textContent = `📊 Approval rate: ${approvalRate}% (${approved}/${total})`;
                     approvalNote.className = 'approval-data-note text-success d-block mt-2';
                 } else {
-                    approvalNote.textContent = '📊 Aguardando dados de sinais...';
+                    approvalNote.textContent = '📊 Waiting for signal data...';
                     approvalNote.className = 'approval-data-note text-muted d-block mt-2';
                 }
             }
@@ -1006,10 +1019,10 @@
             const engineStatus = document.getElementById('engineStatus');
             const enginePaused = systemInfo.finviz_engine_paused || false;
             if (enginePaused) {
-                engineStatus.textContent = 'Pausado';
+                engineStatus.textContent = 'Paused';
                 engineStatus.className = 'badge badge-status bg-warning';
             } else {
-                engineStatus.textContent = 'Ativo';
+                engineStatus.textContent = 'Active';
                 engineStatus.className = 'badge badge-status bg-success';
             }
             
@@ -1017,10 +1030,10 @@
             const rateLimiterStatus = document.getElementById('rateLimiterStatus');
             const rlPaused = systemInfo.webhook_rate_limiter_paused || false;
             if (rlPaused) {
-                rateLimiterStatus.textContent = 'Pausado';
+                rateLimiterStatus.textContent = 'Paused';
                 rateLimiterStatus.className = 'badge badge-status bg-warning';
             } else {
-                rateLimiterStatus.textContent = 'Ativo';
+                rateLimiterStatus.textContent = 'Active';
                 rateLimiterStatus.className = 'badge badge-status bg-success';
             }
             
@@ -1070,7 +1083,7 @@
                 }
             } catch (error) {
                 console.error('Failed to load historical data:', error);
-                showAlert('Dados históricos não disponíveis, usando fallback', 'warning');
+                showAlert('Historical data not available, using fallback', 'warning');
                 
                 // Generate fallback data if all else fails
                 generateFallbackChartData(data);
@@ -1090,13 +1103,13 @@
                 historyData.data.reduce((sum, item) => sum + (item.signals_received || item.total_signals || 0), 0) : 0;
             
             if (historyData.source === 'database') {
-                sourceNote.textContent = `📊 Dados reais do PostgreSQL (${totalSignals} sinais em 24h)`;
+                sourceNote.textContent = `📊 Real data from PostgreSQL (${totalSignals} signals in 24h)`;
                 sourceNote.className = 'data-source-note text-success d-block mt-2';
             } else if (historyData.source === 'calculated') {
-                sourceNote.textContent = `📈 Dados estimados (${totalSignals} sinais estimados)`;
+                sourceNote.textContent = `📈 Estimated data (${totalSignals} estimated signals)`;
                 sourceNote.className = 'data-source-note text-warning d-block mt-2';
             } else {
-                sourceNote.textContent = `ℹ️ Fonte: ${historyData.source || 'desconhecida'} (${totalSignals} sinais)`;
+                sourceNote.textContent = `ℹ️ Source: ${historyData.source || 'unknown'} (${totalSignals} signals)`;
                 sourceNote.className = 'data-source-note text-info d-block mt-2';
             }
         }
@@ -1141,7 +1154,7 @@
                 sourceNote.className = 'data-source-note text-muted d-block mt-2';
                 chartContainer.appendChild(sourceNote);
             }
-            sourceNote.textContent = '⚠️ Dados básicos de fallback (histórico indisponível)';
+            sourceNote.textContent = '⚠️ Basic fallback data (history unavailable)';
             sourceNote.className = 'data-source-note text-muted d-block mt-2';
         }
         
@@ -1161,7 +1174,7 @@
             const container = document.getElementById('sellAllTickers');
             
             if (!data || !data.tickers || data.tickers.length === 0) {
-                container.innerHTML = '<span class="text-muted">Nenhum ticker na lista</span>';
+                container.innerHTML = '<span class="text-muted">No tickers in list</span>';
                 return;
             }
             
@@ -1185,25 +1198,24 @@
                 
             } catch (error) {
                 console.error('Error loading top-N tickers:', error);
-                showAlert('Erro ao carregar lista de Top-N Tickers: ' + error.message, 'danger');
+                showAlert('Error loading Top-N Tickers list: ' + error.message, 'danger');
             }
         }
-        
-        // Update top-N tickers display
+          // Update top-N tickers display
         function updateTopNTickers(data) {
             const container = document.getElementById('topNTickers');
             const countDisplay = document.getElementById('topNTickerCount');
             const timestampDisplay = document.getElementById('topNTimestamp');
             
             if (!data || !data.tickers || data.tickers.length === 0) {
-                container.innerHTML = '<span class="text-muted">Nenhum ticker aprovado</span>';
+                container.innerHTML = '<span class="text-muted">No approved tickers</span>';
                 countDisplay.textContent = '0';
                 timestampDisplay.textContent = '-';
                 return;
             }
-            
+
             const tickersHtml = data.tickers.map(ticker => 
-                `<span class="sell-all-ticker">${ticker}</span>`
+                `<span class="sell-all-ticker clickable-ticker" onclick="addTopNTickerToSellAll('${ticker}')" title="Click to add to Sell All list">${ticker}</span>`
             ).join('');
             
             container.innerHTML = tickersHtml;
@@ -1257,16 +1269,16 @@
                             hour: 'numeric', minute: 'numeric', second: 'numeric', 
                             hour12: false 
                         };
-                        timestampDisplay.textContent = date.toLocaleString('pt-BR', options);
+                        timestampDisplay.textContent = date.toLocaleString('en-US', options);
                     } else {
-                        timestampDisplay.textContent = 'Data inválida';
+                        timestampDisplay.textContent = 'Invalid date';
                     }
                 } catch (e) {
                     console.warn('Error parsing timestamp:', timestampValue, e);
-                    timestampDisplay.textContent = 'Erro na data';
+                    timestampDisplay.textContent = 'Date error';
                 }
             } else {
-                timestampDisplay.textContent = 'Agora';
+                timestampDisplay.textContent = 'Now';
             }
         }
         
@@ -1313,8 +1325,8 @@
                 
             } catch (error) {
                 console.error('Error loading audit trail:', error);
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">Erro ao carregar dados da auditoria: ' + error.message + '</td></tr>';
-                showAlert('Erro ao carregar auditoria: ' + error.message, 'danger');
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">Error loading audit data: ' + error.message + '</td></tr>';
+                showAlert('Error loading audit: ' + error.message, 'danger');
             } finally {
                 isLoading = false;
             }
@@ -1325,13 +1337,13 @@
             const tbody = document.getElementById('auditTableBody');
             
             if (!data.events || data.events.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Nenhum evento encontrado</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No events found</td></tr>';
                 return;
             }
             
             const rows = data.events.map(event => {
                 // Handle invalid timestamps more robustly
-                let timestamp = 'Data inválida';
+                let timestamp = 'Invalid date';
                 if (event.timestamp) {
                     try {
                         let date;
@@ -1362,7 +1374,7 @@
                         }
                         
                         if (date && !isNaN(date.getTime())) {
-                            timestamp = date.toLocaleString('pt-BR', {
+                            timestamp = date.toLocaleString('en-US', {
                                 year: 'numeric', month: '2-digit', day: '2-digit',
                                 hour: '2-digit', minute: '2-digit', second: '2-digit',
                                 hour12: false
@@ -1468,8 +1480,8 @@
             const total = data.total || 0;
             const hasMore = data.has_more || false;
             
-            resultsInfo.textContent = `Exibindo ${data.events?.length || 0} de ${total} eventos`;
-            pageInfo.textContent = `Página ${currentPage}`;
+            resultsInfo.textContent = `Showing ${data.events?.length || 0} of ${total} events`;
+            pageInfo.textContent = `Page ${currentPage}`;
             
             prevBtn.disabled = currentPage === 1;
             nextBtn.disabled = !hasMore;
@@ -1478,19 +1490,35 @@
         // Bind event handlers
         function bindEventHandlers() {
             // Control buttons
-            document.getElementById('pauseEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/pause', 'Engine pausado'));
-            document.getElementById('resumeEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/resume', 'Engine retomado'));
-            document.getElementById('refreshEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/manual-refresh', 'Atualização de tickers iniciada'));
-            document.getElementById('resetMetricsBtn').addEventListener('click', () => sendControlCommand('/admin/metrics/reset', 'Métricas resetadas'));
-            document.getElementById('pauseRateLimiterBtn').addEventListener('click', () => sendControlCommand('/admin/webhook-rate-limiter/pause', 'Rate Limiter pausado'));
-            document.getElementById('resumeRateLimiterBtn').addEventListener('click', () => sendControlCommand('/admin/webhook-rate-limiter/resume', 'Rate Limiter retomado'));
+            document.getElementById('pauseEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/pause', 'Engine paused'));
+            document.getElementById('resumeEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/resume', 'Engine resumed'));
+            document.getElementById('refreshEngineBtn').addEventListener('click', () => sendControlCommand('/admin/engine/manual-refresh', 'Ticker update started'));
+            document.getElementById('resetMetricsBtn').addEventListener('click', () => sendControlCommand('/admin/metrics/reset', 'Metrics reset'));
+            document.getElementById('pauseRateLimiterBtn').addEventListener('click', () => sendControlCommand('/admin/webhook-rate-limiter/pause', 'Rate Limiter paused'));
+            document.getElementById('resumeRateLimiterBtn').addEventListener('click', () => sendControlCommand('/admin/webhook-rate-limiter/resume', 'Rate Limiter resumed'));
             
             // Sell all buttons
             document.getElementById('executeSellAllBtn').addEventListener('click', executeSellAll);
             document.getElementById('refreshSellAllBtn').addEventListener('click', loadSellAllList);
+            document.getElementById('addTickerBtn').addEventListener('click', addTickerToSellAll);
+            document.getElementById('sellIndividualBtn').addEventListener('click', executeIndividualSell);
             
             // Top-N refresh button
             document.getElementById('refreshTopNBtn').addEventListener('click', loadTopNTickers);
+            
+            // Manual ticker input - add on Enter key
+            document.getElementById('manualTickerInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    addTickerToSellAll();
+                }
+            });
+            
+            // Individual sell input - sell on Enter key
+            document.getElementById('sellIndividualInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    executeIndividualSell();
+                }
+            });
             
             // Audit trail controls
             document.getElementById('applyFiltersBtn').addEventListener('click', () => {
@@ -1516,9 +1544,9 @@
                 // Get admin token if needed
                 let token = localStorage.getItem('admin_token');
                 if (!token) {
-                    token = prompt('Digite o token de administrador:');
+                    token = prompt('Enter admin token:');
                     if (!token) {
-                        showAlert('Token necessário para executar comandos administrativos', 'warning');
+                        showAlert('Token required to execute administrative commands', 'warning');
                         return;
                     }
                     localStorage.setItem('admin_token', token);
@@ -1539,20 +1567,20 @@
                 } else if (response.status === 403) {
                     // Clear invalid token
                     localStorage.removeItem('admin_token');
-                    showAlert('Token inválido. Tente novamente.', 'danger');
+                    showAlert('Invalid token. Please try again.', 'danger');
                 } else {
                     const errorData = await response.json().catch(() => ({}));
                     throw new Error(errorData.detail || `HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error(`Error sending command to ${endpoint}:`, error);
-                showAlert(`Erro ao executar comando: ${error.message}`, 'danger');
+                showAlert(`Error executing command: ${error.message}`, 'danger');
             }
         }
         
         // Execute sell all
         async function executeSellAll() {
-            if (!confirm('Tem certeza que deseja executar SELL ALL? Esta ação irá vender todas as posições na lista.')) {
+            if (!confirm('Are you sure you want to execute SELL ALL? This action will sell all positions in the list.')) {
                 return;
             }
             
@@ -1560,9 +1588,9 @@
                 // Get admin token
                 let token = localStorage.getItem('admin_token');
                 if (!token) {
-                    token = prompt('Digite o token de administrador:');
+                    token = prompt('Enter admin token:');
                     if (!token) {
-                        showAlert('Token necessário para executar SELL ALL', 'warning');
+                        showAlert('Admin token required to execute SELL ALL', 'warning');
                         return;
                     }
                     localStorage.setItem('admin_token', token);
@@ -1576,18 +1604,163 @@
                 
                 if (response.ok) {
                     const data = await response.json();
-                    showAlert(`Sell All executado com sucesso! ${data.signals_sent || data.processed_tickers || 'N/A'} sinais enviados.`, 'success');
+                    showAlert(`Sell All executed successfully! ${data.signals_sent || data.processed_tickers || 'N/A'} signals sent.`, 'success');
                     loadSellAllList();
                 } else if (response.status === 403) {
                     localStorage.removeItem('admin_token');
-                    showAlert('Token inválido. Tente novamente.', 'danger');
+                    showAlert('Invalid token. Please try again.', 'danger');
                 } else {
                     const errorData = await response.json().catch(() => ({}));
                     throw new Error(errorData.detail || `HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error('Error executing sell all:', error);
-                showAlert(`Erro ao executar Sell All: ${error.message}`, 'danger');
+                showAlert(`Error executing Sell All: ${error.message}`, 'danger');
+            }
+        }
+
+        // Add ticker to Sell All list
+        async function addTickerToSellAll() {
+            const input = document.getElementById('manualTickerInput');
+            const ticker = input.value.trim().toUpperCase();
+            
+            if (!ticker) {
+                showAlert('Please enter a valid ticker', 'warning');
+                return;
+            }
+            
+            try {
+                // Get admin token
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Enter admin token:');
+                    if (!token) {
+                        showAlert('Admin token required to add ticker', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+
+                const response = await fetch('/admin/sell-all-queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        token: token,
+                        ticker: ticker 
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showAlert(`Ticker ${ticker} added to Sell All list`, 'success');
+                    input.value = '';  // Clear input
+                    loadSellAllList();  // Refresh list
+                } else if (response.status === 403) {
+                    localStorage.removeItem('admin_token');
+                    showAlert('Invalid token. Please try again.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error adding ticker to sell all:', error);
+                showAlert(`Error adding ticker: ${error.message}`, 'danger');
+            }
+        }
+
+        // Execute individual sell order
+        async function executeIndividualSell() {
+            const input = document.getElementById('sellIndividualInput');
+            const ticker = input.value.trim().toUpperCase();
+            
+            if (!ticker) {
+                showAlert('Please enter a valid ticker', 'warning');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to create an individual sell order for ${ticker}?`)) {
+                return;
+            }
+            
+            try {
+                // Get admin token
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Enter admin token:');
+                    if (!token) {
+                        showAlert('Admin token required to execute individual sell', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+
+                const response = await fetch('/admin/order/sell-individual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        token: token,
+                        ticker: ticker 
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showAlert(`Individual sell order created for ${ticker}`, 'success');
+                    input.value = '';  // Clear input
+                    loadAuditTrail();  // Refresh audit trail to show new signal
+                } else if (response.status === 403) {
+                    localStorage.removeItem('admin_token');
+                    showAlert('Invalid token. Please try again.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error executing individual sell:', error);
+                showAlert(`Error executing individual sell: ${error.message}`, 'danger');
+            }
+        }
+
+        // Add ticker from Top-N list to Sell All (called when clicking on ticker)
+        async function addTopNTickerToSellAll(ticker) {
+            if (!confirm(`Add ${ticker} to Sell All list?`)) {
+                return;
+            }
+            
+            try {
+                // Get admin token
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Enter admin token:');
+                    if (!token) {
+                        showAlert('Admin token required to add ticker', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+
+                const response = await fetch('/admin/sell-all-queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        token: token,
+                        ticker: ticker 
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert(`Ticker ${ticker} added to Sell All list`, 'success');
+                    loadSellAllList();  // Refresh sell all list
+                } else if (response.status === 403) {
+                    localStorage.removeItem('admin_token');
+                    showAlert('Invalid token. Please try again.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error adding Top-N ticker to sell all:', error);
+                showAlert(`Error adding ticker: ${error.message}`, 'danger');
             }
         }
         
@@ -1669,11 +1842,11 @@
         }
         
         function setAdminToken() {
-            const token = prompt('Digite o token de administrador:');
+            const token = prompt('Enter admin token:');
             if (token) {
                 localStorage.setItem('admin_token', token);
                 document.getElementById('adminToken').value = token;
-                showAlert('Token salvo com sucesso!', 'success');
+                showAlert('Token saved successfully!', 'success');
             }
         }
         
@@ -1707,7 +1880,7 @@
                 
             } catch (error) {
                 console.error('Error loading current config:', error);
-                showAlert('Erro ao carregar configurações atuais', 'warning');
+                showAlert('Error loading current configurations', 'warning');
             }
         }
         
@@ -1719,7 +1892,7 @@
             const timeout = document.getElementById('webhookTimeout').value;
             
             if (!webhookUrl) {
-                showAlert('URL do webhook é obrigatória', 'warning');
+                showAlert('Webhook URL is required', 'warning');
                 return;
             }
             
@@ -1735,13 +1908,13 @@
                 });
                 
                 if (response.ok) {
-                    showAlert('Configuração do webhook atualizada com sucesso!', 'success');
+                    showAlert('Webhook configuration updated successfully!', 'success');
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error('Error updating webhook config:', error);
-                showAlert('Erro ao atualizar configuração do webhook: ' + error.message, 'danger');
+                showAlert('Error updating webhook configuration: ' + error.message, 'danger');
             }
         }
         
@@ -1754,7 +1927,7 @@
             const refreshInterval = document.getElementById('refreshInterval').value;
             
             if (!finvizUrl) {
-                showAlert('URL do Finviz é obrigatória', 'warning');
+                showAlert('Finviz URL is required', 'warning');
                 return;
             }
             
@@ -1771,13 +1944,13 @@
                 });
                 
                 if (response.ok) {
-                    showAlert('Configuração do Finviz atualizada com sucesso!', 'success');
+                    showAlert('Finviz configuration updated successfully!', 'success');
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error('Error updating finviz config:', error);
-                showAlert('Erro ao atualizar configuração do Finviz: ' + error.message, 'danger');
+                showAlert('Error updating Finviz configuration: ' + error.message, 'danger');
             }
         }
         
@@ -1800,24 +1973,24 @@
                 });
                 
                 if (response.ok) {
-                    showAlert('Configuração do Rate Limiter atualizada com sucesso!', 'success');
+                    showAlert('Rate Limiter configuration updated successfully!', 'success');
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error('Error updating rate limiter config:', error);
-                showAlert('Erro ao atualizar configuração do Rate Limiter: ' + error.message, 'danger');
+                showAlert('Error updating Rate Limiter configuration: ' + error.message, 'danger');
             }
         }
         
         function getAdminToken() {
             let token = localStorage.getItem('admin_token');
             if (!token) {
-                token = prompt('Digite o token de administrador:');
+                token = prompt('Enter admin token:');
                 if (token) {
                     localStorage.setItem('admin_token', token);
                 } else {
-                    showAlert('Token necessário para realizar alterações', 'warning');
+                    showAlert('Token required for changes', 'warning');
                     return null;
                 }
             }
@@ -1828,16 +2001,16 @@
             const token = document.getElementById('adminToken').value;
             if (token) {
                 localStorage.setItem('admin_token', token);
-                showAlert('Token salvo com sucesso!', 'success');
+                showAlert('Token saved successfully!', 'success');
             } else {
-                showAlert('Digite um token válido', 'warning');
+                showAlert('Enter a valid token', 'warning');
             }
         }
         
         function clearAdminToken() {
             localStorage.removeItem('admin_token');
             document.getElementById('adminToken').value = '';
-            showAlert('Token removido', 'info');
+            showAlert('Token removed', 'info');
         }
         
         function toggleTokenVisibility() {
