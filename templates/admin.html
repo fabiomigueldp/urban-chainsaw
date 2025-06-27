@@ -157,6 +157,31 @@
             font-size: 0.875rem;
             display: inline-block;
         }
+        
+        .top-n-ticker {
+            margin: 2px;
+            padding: 4px 8px;
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            display: inline-block;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+        
+        .top-n-ticker:hover {
+            background: #b8daff;
+            border-color: #6ba6cd;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .top-n-ticker:active {
+            transform: translateY(0);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
 <body>
@@ -509,50 +534,79 @@
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-star-fill"></i> Top-N Tickers Aprovados
+                            <i class="bi bi-star-fill"></i> Top-N Approved Tickers
                         </h5>
                     </div>
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="mb-0">Lista Atual (<span id="topNTickerCount">0</span> tickers):</h6>
+                            <h6 class="mb-0">Current List (<span id="topNTickerCount">0</span> tickers):</h6>
                             <button id="refreshTopNBtn" class="btn btn-outline-primary btn-sm">
-                                <i class="bi bi-arrow-clockwise"></i> Atualizar
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
                             </button>
                         </div>
                         <div id="topNTickers" class="mb-3" style="max-height: 200px; overflow-y: auto;">
-                            <span class="text-muted">Carregando...</span>
+                            <span class="text-muted">Loading...</span>
                         </div>
-                        <small class="text-muted">
+                        <small class="text-success">
                             <i class="bi bi-info-circle"></i> 
-                            Apenas sinais de tickers nesta lista serão aprovados e encaminhados
+                            Click on any ticker to add it to Sell All list
+                        </small>
+                        <br>
+                        <small class="text-muted">
+                            <i class="bi bi-shield-check"></i> 
+                            Only signals from these tickers will be approved and forwarded
                         </small>
                         <div id="topNLastUpdate" class="mt-2">
-                            <small class="text-muted">Última atualização: <span id="topNTimestamp">-</span></small>
+                            <small class="text-muted">Last Update: <span id="topNTimestamp">-</span></small>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="col-md-6">
-                <!-- Keep Sell All Management here -->
+                <!-- Sell All Management -->
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-list-check"></i> Gerenciamento Sell All
+                            <i class="bi bi-list-check"></i> Sell All Management
                         </h5>
                     </div>
                     <div class="card-body">
+                        <!-- Manual Ticker Addition -->
                         <div class="mb-3">
-                            <h6>Tickers na Lista Sell All:</h6>
-                            <div id="sellAllTickers" style="max-height: 150px; overflow-y: auto;">
-                                <span class="text-muted">Carregando...</span>
+                            <h6>Add Ticker Manually:</h6>
+                            <div class="input-group">
+                                <input type="text" id="manualTickerInput" class="form-control" placeholder="Enter ticker (e.g., AAPL)" style="text-transform: uppercase;">
+                                <button id="addTickerBtn" class="btn btn-outline-primary">
+                                    <i class="bi bi-plus-circle"></i> Add
+                                </button>
                             </div>
                         </div>
+                        
+                        <!-- Individual Sell Order -->
+                        <div class="mb-3">
+                            <h6>Individual Sell Order:</h6>
+                            <div class="input-group">
+                                <input type="text" id="sellIndividualInput" class="form-control" placeholder="Enter ticker to sell" style="text-transform: uppercase;">
+                                <button id="sellIndividualBtn" class="btn btn-warning">
+                                    <i class="bi bi-arrow-down-circle"></i> Sell
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Current Sell All List -->
+                        <div class="mb-3">
+                            <h6>Tickers in Sell All List:</h6>
+                            <div id="sellAllTickers" style="max-height: 150px; overflow-y: auto;">
+                                <span class="text-muted">Loading...</span>
+                            </div>
+                        </div>
+                        
                         <div class="d-grid gap-2">
                             <button id="executeSellAllBtn" class="btn btn-danger">
-                                <i class="bi bi-exclamation-triangle"></i> Executar Sell All
+                                <i class="bi bi-exclamation-triangle"></i> Execute Sell All
                             </button>
                             <button id="refreshSellAllBtn" class="btn btn-outline-secondary">
-                                <i class="bi bi-arrow-clockwise"></i> Atualizar Lista
+                                <i class="bi bi-arrow-clockwise"></i> Refresh List
                             </button>
                         </div>
                     </div>
