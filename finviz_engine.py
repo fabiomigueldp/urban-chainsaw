@@ -37,6 +37,8 @@ class FinvizConfig(BaseModel):
     url: HttpUrl
     top_n: int
     refresh: int = DEFAULT_TICKER_REFRESH_SEC # seconds
+    reprocess_enabled: bool = Field(default=False, description="Enable reprocessing of recently rejected signals for new Top-N tickers.")
+    reprocess_window_seconds: int = Field(default=300, description="Time window in seconds to look back for rejected signals to reprocess.")
 
     @validator('top_n')
     def top_n_must_be_positive(cls, v):
@@ -283,9 +285,11 @@ class FinvizEngine:
             self._current_config = FinvizConfig(
                 url=config_data["finviz_url"],
                 top_n=config_data["top_n"],
-                refresh=config_data.get("refresh_interval_sec", DEFAULT_TICKER_REFRESH_SEC)
+                refresh=config_data.get("refresh_interval_sec", DEFAULT_TICKER_REFRESH_SEC),
+                reprocess_enabled=config_data.get("reprocess_enabled", False),
+                reprocess_window_seconds=config_data.get("reprocess_window_seconds", 300)
             )
-            _logger.info(f"Successfully loaded config: URL={self._current_config.url}, TopN={self._current_config.top_n}, Refresh={self._current_config.refresh}s")
+            _logger.info(f"Successfully loaded config: URL={self._current_config.url}, TopN={self._current_config.top_n}, Refresh={self._current_config.refresh}s, ReprocessEnabled={self._current_config.reprocess_enabled}, ReprocessWindow={self._current_config.reprocess_window_seconds}s")
         except Exception as e:
             _logger.error(f"Error loading config from {FINVIZ_CONFIG_FILE}: {e}. Engine will use last known good config or defaults if available.")
             if not self._current_config: # If there's no config at all (e.g. first run)
@@ -308,6 +312,18 @@ class FinvizEngine:
                 proposed_data["top_n"] = new_config_data["top_n"]
             if "refresh" in new_config_data and new_config_data["refresh"] is not None:
                 proposed_data["refresh"] = new_config_data["refresh"]
+
+            # Handle new reprocessing fields
+            if "reprocess_enabled" in new_config_data and new_config_data["reprocess_enabled"] is not None:
+                proposed_data["reprocess_enabled"] = new_config_data["reprocess_enabled"]
+            elif "reprocess_enabled" not in proposed_data: # Ensure default if not present
+                proposed_data["reprocess_enabled"] = self._current_config.reprocess_enabled if self._current_config else False
+
+            if "reprocess_window_seconds" in new_config_data and new_config_data["reprocess_window_seconds"] is not None:
+                proposed_data["reprocess_window_seconds"] = new_config_data["reprocess_window_seconds"]
+            elif "reprocess_window_seconds" not in proposed_data: # Ensure default if not present
+                proposed_data["reprocess_window_seconds"] = self._current_config.reprocess_window_seconds if self._current_config else 300
+
 
             try:
                 new_cfg = FinvizConfig(**proposed_data)
@@ -357,7 +373,9 @@ class FinvizEngine:
             persist_finviz_config_from_dict({
                 "finviz_url": str(new_cfg.url), # Pydantic HttpUrl to string
                 "top_n": new_cfg.top_n,
-                "refresh_interval_sec": new_cfg.refresh
+                "refresh_interval_sec": new_cfg.refresh,
+                "reprocess_enabled": new_cfg.reprocess_enabled,
+                "reprocess_window_seconds": new_cfg.reprocess_window_seconds
             })
             self._current_config = new_cfg
             _logger.info(f"FinvizEngine config updated and persisted: {self._current_config}")
@@ -423,9 +441,16 @@ class FinvizEngine:
 
     async def _update_tickers_safely(self, cfg: FinvizConfig):
         """Wraps _update_tickers with error handling to preserve last_known_good_tickers."""
+        current_cfg = await self.get_config() # Get the most recent config, including reprocessing settings
+
         try:
-            new_tickers = await self._fetch_all_tickers(cfg)
+            new_tickers = await self._fetch_all_tickers(cfg) # cfg here is the one passed to the run loop iteration
             if new_tickers is not None: # Check if fetch was successful (not None)
+
+                # Identify newly added tickers for reprocessing logic
+                previously_known_tickers = self.last_known_good_tickers.copy()
+                entered_top_n_tickers = new_tickers - previously_known_tickers
+
                 self.shared_state["tickers"] = new_tickers
                 self.last_known_good_tickers = new_tickers.copy() # Update last known good
                 # finviz_update_success_total.inc() # If using Prometheus
@@ -446,6 +471,12 @@ class FinvizEngine:
                 await comm_engine.trigger_top_n_tickers_update(top_n_data)
                 # Send complete status update using centralized comm_engine
                 await self._broadcast_status_update()
+
+                # --- Reprocessing Logic ---
+                if current_cfg.reprocess_enabled and entered_top_n_tickers:
+                    _logger.info(f"Reprocessing enabled. Tickers newly entered Top-N: {entered_top_n_tickers}")
+                    await self._reprocess_signals_for_new_tickers(entered_top_n_tickers, current_cfg.reprocess_window_seconds)
+
             else:
                 # finviz_update_failure_total.inc() # If using Prometheus
                 
@@ -472,6 +503,88 @@ class FinvizEngine:
             await self.admin_ws_broadcaster(event_type="finviz_update_failed", data={"error": str(e), "count": len(self.last_known_good_tickers)})
             # Send complete status update
             await self._broadcast_status_update()
+
+    async def _reprocess_signals_for_new_tickers(self, new_tickers: Set[str], window_seconds: int):
+        _logger.info(f"Attempting to reprocess signals for {len(new_tickers)} new tickers within a {window_seconds}s window.")
+        from main import db_manager, approved_signal_queue, shared_state # Import necessary components
+        from database.simple_models import SignalStatusEnum, SignalLocationEnum, Signal as DBSignalModel # Import Signal for type hint
+        import time
+
+        for ticker in new_tickers:
+            try:
+                _logger.debug(f"Checking for rejected signals for new ticker: {ticker}")
+                rejected_signals_payloads = await db_manager.get_rejected_signals_for_reprocessing(ticker, window_seconds)
+
+                if rejected_signals_payloads:
+                    _logger.info(f"Found {len(rejected_signals_payloads)} rejected signals for ticker {ticker} to reprocess.")
+                    for signal_payload_dict in rejected_signals_payloads:
+                        signal_id = signal_payload_dict.get("signal_id")
+                        if not signal_id:
+                            _logger.error(f"Skipping reprocessing for signal with missing ID: {signal_payload_dict}")
+                            continue
+
+                        _logger.info(f"Reprocessing signal ID {signal_id} for ticker {ticker}.")
+
+                        # 1. Change status to APPROVED in DB and log event
+                        reapproved = await db_manager.reapprove_signal(signal_id, "Signal re-approved due to ticker entering Top-N list.")
+                        if not reapproved:
+                            _logger.error(f"Failed to re-approve signal {signal_id} in database.")
+                            continue
+
+                        # 2. Add to approved_signal_queue for forwarding
+                        # Reconstruct the Signal object from the stored original_signal dict
+                        from models import Signal as SignalPydanticModel
+                        try:
+                            original_signal_data = signal_payload_dict.get("original_signal", {})
+                            if not original_signal_data: # Fallback if original_signal is empty
+                                original_signal_data = {
+                                    "ticker": signal_payload_dict.get("ticker"),
+                                    "side": signal_payload_dict.get("side"),
+                                    "price": signal_payload_dict.get("price"),
+                                    "time": signal_payload_dict.get("created_at").isoformat() if signal_payload_dict.get("created_at") else None,
+                                    "signal_id": signal_id # Ensure signal_id is present
+                                }
+
+                            reprocessed_signal = SignalPydanticModel(**original_signal_data)
+                            # Ensure the signal_id matches the one from the database record
+                            reprocessed_signal.signal_id = signal_id
+
+                        except Exception as pydantic_error:
+                            _logger.error(f"Error reconstructing Signal object for {signal_id}: {pydantic_error}. Original data: {original_signal_data}")
+                            continue
+
+                        approved_signal_data = {
+                            'signal': reprocessed_signal, # The Pydantic Signal model instance
+                            'ticker': reprocessed_signal.normalised_ticker(),
+                            'approved_at': time.time(),
+                            'worker_id': 'reprocessing_engine',
+                            'signal_id': signal_id
+                        }
+                        await approved_signal_queue.put(approved_signal_data)
+                        _logger.info(f"Signal {signal_id} for {ticker} re-queued for forwarding.")
+
+                        # 3. Update metrics
+                        shared_state["signal_metrics"]["signals_approved"] += 1
+                        if shared_state["signal_metrics"]["signals_rejected"] > 0: # Avoid going negative
+                            shared_state["signal_metrics"]["signals_rejected"] -= 1
+
+                        # Broadcast updated metrics (consider if this should be done after all reprocessing or per signal)
+                        # from comm_engine import comm_engine
+                        # from main import get_current_metrics
+                        # await comm_engine.broadcast("metrics_update", get_current_metrics())
+                else:
+                    _logger.debug(f"No rejected signals found for ticker {ticker} in the last {window_seconds}s.")
+            except Exception as e:
+                _logger.error(f"Error during reprocessing for ticker {ticker}: {e}", exc_info=True)
+
+        # Broadcast metrics once after all reprocessing for the cycle
+        try:
+            from comm_engine import comm_engine
+            from main import get_current_metrics
+            await comm_engine.broadcast("metrics_update", get_current_metrics())
+            _logger.info("Metrics broadcasted after reprocessing cycle.")
+        except Exception as e:
+            _logger.error(f"Error broadcasting metrics after reprocessing: {e}")
 
 
     async def _fetch_all_tickers(self, cfg: FinvizConfig) -> Optional[Set[str]]:

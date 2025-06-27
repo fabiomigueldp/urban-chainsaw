@@ -579,6 +579,21 @@
                         <div id="topNLastUpdate" class="mt-2">
                             <small class="text-muted">Last Update: <span id="topNTimestamp">-</span></small>
                         </div>
+                        <hr>
+                        <div>
+                            <h6>Reprocess Rejected Signals</h6>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" role="switch" id="reprocessEnabledSwitch">
+                                <label class="form-check-label" for="reprocessEnabledSwitch">Enable Reprocessing</label>
+                            </div>
+                            <div class="mb-2">
+                                <label for="reprocessWindowInput" class="form-label">Reprocess Window (seconds):</label>
+                                <input type="number" class="form-control form-control-sm" id="reprocessWindowInput" value="300" min="30" max="3600">
+                            </div>
+                            <button id="updateReprocessConfigBtn" class="btn btn-outline-success btn-sm">
+                                <i class="bi bi-check-circle"></i> Apply Reprocess Settings
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1521,6 +1536,7 @@
             
             // Top-N refresh button
             document.getElementById('refreshTopNBtn').addEventListener('click', loadTopNTickers);
+            document.getElementById('updateReprocessConfigBtn').addEventListener('click', updateReprocessConfig);
             
             // Manual ticker input - add on Enter key
             document.getElementById('manualTickerInput').addEventListener('keypress', function(e) {
@@ -1883,6 +1899,9 @@
                     document.getElementById('finvizUrl').value = finvizData.finviz_url || '';
                     document.getElementById('topN').value = finvizData.top_n || 15;
                     document.getElementById('refreshInterval').value = finvizData.refresh_interval_sec || 10;
+                    // Load reprocess config from the same endpoint
+                    document.getElementById('reprocessEnabledSwitch').checked = finvizData.reprocess_enabled || false;
+                    document.getElementById('reprocessWindowInput').value = finvizData.reprocess_window_seconds || 300;
                 }
                 
                 // Load rate limiter config (from system status)
@@ -1941,6 +1960,8 @@
             const finvizUrl = document.getElementById('finvizUrl').value;
             const topN = document.getElementById('topN').value;
             const refreshInterval = document.getElementById('refreshInterval').value;
+            const reprocessEnabled = document.getElementById('reprocessEnabledSwitch').checked;
+            const reprocessWindowSeconds = document.getElementById('reprocessWindowInput').value;
             
             if (!finvizUrl) {
                 showAlert('Finviz URL is required', 'warning');
@@ -1955,18 +1976,63 @@
                         token: token,
                         finviz_url: finvizUrl,
                         top_n: parseInt(topN),
-                        refresh_interval_sec: parseInt(refreshInterval)
+                        refresh_interval_sec: parseInt(refreshInterval),
+                        reprocess_enabled: reprocessEnabled,
+                        reprocess_window_seconds: parseInt(reprocessWindowSeconds)
                     })
                 });
                 
                 if (response.ok) {
                     showAlert('Finviz configuration updated successfully!', 'success');
                 } else {
-                    throw new Error(`HTTP ${response.status}`);
+                    const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+                    throw new Error(errorData.detail);
                 }
             } catch (error) {
                 console.error('Error updating finviz config:', error);
                 showAlert('Error updating Finviz configuration: ' + error.message, 'danger');
+            }
+        }
+
+        async function updateReprocessConfig() {
+            const token = getAdminToken();
+            if (!token) return;
+
+            const reprocessEnabled = document.getElementById('reprocessEnabledSwitch').checked;
+            const reprocessWindowSeconds = document.getElementById('reprocessWindowInput').value;
+
+            // We can reuse the finviz config endpoint as it's part of the same engine settings
+            try {
+                // First, fetch current finviz config to avoid overwriting other settings
+                const currentConfigResponse = await fetch('/admin/finviz/config');
+                if (!currentConfigResponse.ok) {
+                    showAlert('Could not load current Finviz config to update reprocess settings.', 'danger');
+                    return;
+                }
+                const currentConfig = await currentConfigResponse.json();
+
+                const response = await fetch('/finviz/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: token,
+                        finviz_url: currentConfig.finviz_url, // Keep current URL
+                        top_n: currentConfig.top_n, // Keep current Top-N
+                        refresh_interval_sec: currentConfig.refresh_interval_sec, // Keep current refresh
+                        reprocess_enabled: reprocessEnabled,
+                        reprocess_window_seconds: parseInt(reprocessWindowSeconds)
+                    })
+                });
+
+                if (response.ok) {
+                    showAlert('Reprocess configuration updated successfully!', 'success');
+                } else {
+                    const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+                    throw new Error(errorData.detail);
+                }
+            } catch (error) {
+                console.error('Error updating reprocess config:', error);
+                showAlert('Error updating Reprocess configuration: ' + error.message, 'danger');
             }
         }
         

@@ -437,6 +437,77 @@ class DBManager:
         response = await self.query_signals(query_params)
         return response.entries
 
+    async def get_rejected_signals_for_reprocessing(self, ticker: str, window_seconds: int) -> List[Dict[str, Any]]:
+        """
+        Retrieves signals for a specific ticker that were rejected within a given time window.
+        Returns a list of dictionaries, where each dictionary represents a signal.
+        """
+        async with self.get_session() as session:
+            cutoff_time = datetime.utcnow() - timedelta(seconds=window_seconds)
+
+            stmt = (
+                select(Signal)
+                .where(
+                    Signal.normalised_ticker == ticker.upper(),
+                    Signal.status == SignalStatusEnum.REJECTED.value, # Comparing with string value
+                    Signal.created_at >= cutoff_time
+                )
+                .order_by(desc(Signal.created_at)) # Process newer ones first if multiple
+            )
+
+            result = await session.execute(stmt)
+            signals = result.scalars().all()
+
+            # Convert to dictionary, including original_signal if needed for reconstruction
+            signal_list = []
+            for sig in signals:
+                signal_data = {
+                    "signal_id": str(sig.signal_id),
+                    "ticker": sig.ticker,
+                    "normalised_ticker": sig.normalised_ticker,
+                    "side": sig.side,
+                    "price": sig.price,
+                    "status": sig.status,
+                    "created_at": sig.created_at,
+                    "updated_at": sig.updated_at,
+                    "original_signal": sig.original_signal, # Important for reconstructing Signal Pydantic model
+                    "signal_type": sig.signal_type
+                }
+                signal_list.append(signal_data)
+
+            _logger.debug(f"Found {len(signal_list)} rejected signals for ticker {ticker} within {window_seconds}s for reprocessing.")
+            return signal_list
+
+    async def reapprove_signal(self, signal_id: str, details: str) -> bool:
+        """
+        Changes a signal's status to APPROVED and logs a reprocessing event.
+        """
+        async with self.get_session() as session:
+            # Find the signal
+            result = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
+            db_signal = result.scalar_one_or_none()
+
+            if not db_signal:
+                _logger.warning(f"Signal {signal_id} not found for re-approval.")
+                return False
+
+            # Update signal status
+            db_signal.status = SignalStatusEnum.APPROVED.value # Enum -> string for DB
+            db_signal.updated_at = datetime.utcnow()
+
+            # Log reprocessing event
+            reprocessing_event = SignalEvent(
+                signal_id=signal_id,
+                status=SignalStatusEnum.APPROVED.value, # Log event as approved
+                details=details or "Signal re-approved via reprocessing mechanism.",
+                worker_id="reprocessing_engine" # Identify the source of this event
+            )
+            session.add(reprocessing_event)
+
+            await session.flush() # Persist changes
+            _logger.info(f"Signal {signal_id} re-approved. Status: {db_signal.status}. Event logged.")
+            return True
+
     async def get_audit_trail_count(
         self, 
         start_time: Optional[datetime] = None,

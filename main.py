@@ -1143,12 +1143,14 @@ async def update_finviz_engine_config(payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="FinvizEngine not available.")
 
     # Validate payload structure and map frontend field names to engine field names
-    # Frontend sends: finviz_url, top_n, refresh_interval_sec
-    # Engine expects: url, top_n, refresh
+    # Frontend sends: finviz_url, top_n, refresh_interval_sec, reprocess_enabled, reprocess_window_seconds
+    # Engine expects: url, top_n, refresh, reprocess_enabled, reprocess_window_seconds
     field_mapping = {
         "finviz_url": "url",
-        "top_n": "top_n", 
-        "refresh_interval_sec": "refresh"
+        "top_n": "top_n",
+        "refresh_interval_sec": "refresh",
+        "reprocess_enabled": "reprocess_enabled",
+        "reprocess_window_seconds": "reprocess_window_seconds"
     }
     
     update_data = {}
