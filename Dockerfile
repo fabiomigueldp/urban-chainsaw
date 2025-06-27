@@ -35,19 +35,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash --uid 1000 app
+# Copy application code with maximum permissions
+COPY . .
 
-# Copy application code with proper ownership
-COPY --chown=app:app . .
-
-# Create necessary directories and set permissions
+# Create necessary directories and set maximum permissions
 RUN mkdir -p /app/logs /app/data \
-    && chown -R app:app /app/logs /app/data \
-    && chmod 755 /app/logs /app/data
+    && chmod 777 /app /app/logs /app/data \
+    && chmod 666 /app/finviz_config.json || touch /app/finviz_config.json && chmod 666 /app/finviz_config.json \
+    && chmod 666 /app/*.py /app/*.json || true
 
-# Switch to non-root user
-USER app
+# Run as root for maximum permissions
+USER root
 
 # Health check with better error handling
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
@@ -57,5 +55,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 EXPOSE 80
 EXPOSE 8000
 
-# Production command with proper signal handling for async architecture
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80", "--access-log", "--log-level", "info"]
+# Production command with root privileges for maximum permissions
+CMD ["python", "-c", "import os; os.system('chmod 777 /app; chmod 666 /app/*.json || true'); exec(open('/app/main_with_permissions.py').read())"]

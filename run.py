@@ -58,9 +58,13 @@ def print_error(message: str) -> None:
     """Imprime mensagem de erro."""
     print_colored(f"❌ {message}", Colors.FAIL)
 
-def run_command(command: List[str], capture_output: bool = True, check: bool = True) -> subprocess.CompletedProcess:
-    """Executa comando e retorna resultado."""
+def run_command(command: List[str], capture_output: bool = True, check: bool = True, use_sudo: bool = False) -> subprocess.CompletedProcess:
+    """Executa comando e retorna resultado, opcionalmente com sudo."""
     try:
+        # Adicionar sudo se solicitado e não estiver no Windows
+        if use_sudo and os.name != 'nt':
+            command = ['sudo'] + command
+        
         if capture_output:
             result = subprocess.run(command, capture_output=True, text=True, check=check)
         else:
