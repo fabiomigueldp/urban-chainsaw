@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS signals (
     -- Status tracking (STRING no banco, ENUM no Python)
     status VARCHAR(30) NOT NULL DEFAULT 'received',
     
+    -- Signal type (NEW: distinguish between buy, sell, manual_sell, sell_all)
+    signal_type VARCHAR(20) NOT NULL DEFAULT 'buy',
+    
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -61,6 +64,7 @@ CREATE TABLE IF NOT EXISTS signal_events (
 CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
 CREATE INDEX IF NOT EXISTS idx_signals_normalised_ticker ON signals(normalised_ticker);
 CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
+CREATE INDEX IF NOT EXISTS idx_signals_signal_type ON signals(signal_type);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_updated_at ON signals(updated_at);
 

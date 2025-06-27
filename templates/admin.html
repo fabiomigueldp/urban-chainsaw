@@ -204,8 +204,8 @@
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-success" id="signalsApproved">-</div>
-                        <div class="metric-label">Sinais Aprovados</div>
-                        <small class="text-muted">Passou no filtro Top-N</small>
+                        <div class="metric-label">Signals Approved</div>
+                        <small class="text-muted">Passed Top-N filter</small>
                     </div>
                 </div>
             </div>
@@ -594,6 +594,16 @@
                                     </select>
                                 </div>
                                 <div class="col-md-2">
+                                    <label for="signalTypeFilter" class="form-label">Tipo:</label>
+                                    <select id="signalTypeFilter" class="form-select form-select-sm">
+                                        <option value="">Todos</option>
+                                        <option value="buy">Buy</option>
+                                        <option value="sell">Sell</option>
+                                        <option value="manual_sell">Manual Sell</option>
+                                        <option value="sell_all">Sell All</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
                                     <label for="tickerFilter" class="form-label">Ticker:</label>
                                     <input type="text" id="tickerFilter" class="form-control form-control-sm" placeholder="Ex: AAPL">
                                 </div>
@@ -611,7 +621,9 @@
                                         <option value="168">7 dias</option>
                                     </select>
                                 </div>
-                                <div class="col-md-2">
+                            </div>
+                            <div class="row mt-2">
+                                <div class="col-md-4">
                                     <label class="form-label">&nbsp;</label>
                                     <div class="d-grid">
                                         <button id="applyFiltersBtn" class="btn btn-primary btn-sm">
@@ -619,7 +631,7 @@
                                         </button>
                                     </div>
                                 </div>
-                                <div class="col-md-2">
+                                <div class="col-md-4">
                                     <label class="form-label">&nbsp;</label>
                                     <div class="d-grid">
                                         <button id="clearFiltersBtn" class="btn btn-outline-secondary btn-sm">
@@ -638,6 +650,7 @@
                                         <th>Timestamp</th>
                                         <th>Signal ID</th>
                                         <th>Ticker</th>
+                                        <th>Tipo</th>
                                         <th>Status</th>
                                         <th>Localização</th>
                                         <th>Worker</th>
@@ -647,7 +660,7 @@
                                 </thead>
                                 <tbody id="auditTableBody">
                                     <tr>
-                                        <td colspan="8" class="text-center">
+                                        <td colspan="9" class="text-center">
                                             <div class="loading-spinner spinner-border" role="status">
                                                 <span class="visually-hidden">Carregando...</span>
                                             </div>
@@ -761,6 +774,9 @@
                     // Handle metrics reset
                     updateMetrics(data.data);
                     showAlert('Métricas foram resetadas com sucesso', 'info');
+                    break;
+                case 'top_n_tickers_update':
+                    updateTopNTickers(data.data);
                     break;
                 default:
                     console.log('Unknown WebSocket message type:', data.type);
@@ -1218,6 +1234,7 @@
                 // Get filter values
                 const limit = document.getElementById('limitSelect').value;
                 const status = document.getElementById('statusFilter').value;
+                const signalType = document.getElementById('signalTypeFilter').value;
                 const ticker = document.getElementById('tickerFilter').value;
                 const signalId = document.getElementById('signalIdFilter').value;
                 const hours = document.getElementById('hourFilter').value;
@@ -1226,6 +1243,7 @@
                 params.append('offset', (currentPage - 1) * parseInt(limit));
                 
                 if (status) params.append('status_filter', status);
+                if (signalType) params.append('signal_type', signalType);
                 if (ticker) params.append('ticker', ticker);
                 if (signalId) params.append('signal_id', signalId);
                 if (hours) params.append('hours', hours);
@@ -1311,12 +1329,14 @@
                 const signalId = event.signal_id ? 
                     event.signal_id : 
                     'N/A';
+                const signalTypeBadge = getSignalTypeBadge(event.signal_type || 'buy');
                 
                 return `
                     <tr>
                         <td>${timestamp}</td>
                         <td><code>${signalId}</code></td>
                         <td><strong>${event.ticker || '-'}</strong></td>
+                        <td>${signalTypeBadge}</td>
                         <td>${statusBadge}</td>
                         <td>${locationBadge}</td>
                         <td><small>${workerId}</small></td>
@@ -1360,6 +1380,27 @@
             
             const color = locationColors[location] || 'bg-secondary';
             return `<span class="badge ${color}">${location}</span>`;
+        }
+        
+        // Get signal type badge HTML
+        function getSignalTypeBadge(signalType) {
+            const typeColors = {
+                'buy': 'bg-success',
+                'sell': 'bg-warning',
+                'manual_sell': 'bg-info',
+                'sell_all': 'bg-danger'
+            };
+            
+            const typeDisplayNames = {
+                'buy': 'Buy',
+                'sell': 'Sell',
+                'manual_sell': 'Manual Sell',
+                'sell_all': 'Sell All'
+            };
+            
+            const color = typeColors[signalType] || 'bg-secondary';
+            const displayName = typeDisplayNames[signalType] || signalType;
+            return `<span class="badge ${color}">${displayName}</span>`;
         }
         
         // Update pagination controls
@@ -1499,6 +1540,7 @@
         // Clear filters
         function clearFilters() {
             document.getElementById('statusFilter').value = '';
+            document.getElementById('signalTypeFilter').value = '';
             document.getElementById('tickerFilter').value = '';
             document.getElementById('signalIdFilter').value = '';
             document.getElementById('hourFilter').value = '';

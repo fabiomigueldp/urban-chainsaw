@@ -295,6 +295,7 @@ class AuditTrailQuery(BaseModel):
     ticker: Optional[str] = None
     signal_id: Optional[str] = None
     status: Optional[str] = None
+    signal_type: Optional[str] = None  # NEW: Filter by signal type
     location: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None

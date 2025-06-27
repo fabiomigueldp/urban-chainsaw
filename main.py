@@ -67,62 +67,110 @@ from database.simple_models import SignalStatusEnum, SignalLocationEnum
 def get_current_metrics() -> Dict[str, Any]:
     """Get current metrics with real-time data from database and queue sizes."""
     try:
-        # Get real-time data from database (async function called from sync context)
-        import asyncio
-        try:
-            # Try to get running event loop
-            loop = asyncio.get_running_loop()
-            # Create a task to get analytics from database
-            db_task = asyncio.create_task(db_manager.get_system_analytics())
-            # This is a workaround - we'll use cached data for now and update via periodic task
-            if hasattr(get_current_metrics, '_cached_analytics'):
-                db_analytics = get_current_metrics._cached_analytics
-            else:
-                # Use memory fallback if no cached data
-                db_analytics = {}
-        except RuntimeError:
-            # No event loop running, use memory fallback
-            db_analytics = {}
-        
         # Get real queue sizes
         processing_queue_size = queue.qsize() if queue else 0
         approved_queue_size = approved_signal_queue.qsize() if approved_signal_queue else 0
         
-        # Use database data if available, otherwise fall back to memory
-        if db_analytics:
+        # Check if we should force memory metrics (after reset)
+        force_memory = shared_state.get("signal_metrics", {}).get("_force_memory_metrics", False)
+        reset_timestamp = shared_state.get("signal_metrics", {}).get("_reset_timestamp", 0)
+        
+        # Clear force flag after 30 seconds to allow DB cache to rebuild
+        if force_memory and time.time() - reset_timestamp > 30:
+            shared_state["signal_metrics"]["_force_memory_metrics"] = False
+            _logger.info("🔄 METRICS: Clearing force_memory_metrics flag - allowing DB cache to rebuild")
+            force_memory = False
+        
+        # Try to use cached database analytics if available and recent (unless forced to use memory)
+        db_analytics = {}
+        cache_max_age = 30  # seconds - if cache is older than this, consider it stale
+        
+        if not force_memory and (hasattr(get_current_metrics, '_cached_analytics') and 
+            hasattr(get_current_metrics, '_cached_timestamp')):
+            
+            cache_age = time.time() - get_current_metrics._cached_timestamp
+            cached_data = get_current_metrics._cached_analytics
+            
+            # Use cached data if it exists and is not too old
+            if cached_data and cache_age < cache_max_age:
+                db_analytics = cached_data
+                _logger.debug(f"📊 METRICS: Using cached database metrics (age: {cache_age:.1f}s)")
+            else:
+                _logger.debug(f"⏰ METRICS: Cache too old ({cache_age:.1f}s) or empty, will use memory fallback")
+        elif force_memory:
+            _logger.debug(f"🎯 METRICS: Force memory mode active (reset {time.time() - reset_timestamp:.1f}s ago)")
+        else:
+            _logger.debug("🔍 METRICS: No cached metrics available, will use memory fallback")
+        
+        # Use database data if available (persistent across restarts), otherwise fall back to memory
+        if db_analytics and not force_memory:
+            # Database analytics provide persistent counters for some metrics
+            # BUT: For real-time metrics that are incremented in memory (received, approved, rejected),
+            # we should ALWAYS use memory values to ensure consistency with how they're incremented
+            memory_metrics = shared_state["signal_metrics"]
+            
             metrics = {
-                "signals_received": db_analytics.get("total_signals", 0),
-                "signals_approved": db_analytics.get("approved_signals", 0),
-                "signals_rejected": db_analytics.get("rejected_signals", 0),
+                # ALWAYS use memory for these real-time counters (like signals_received and signals_rejected)
+                "signals_received": memory_metrics["signals_received"],
+                "signals_approved": memory_metrics["signals_approved"],  # FIXED: Now uses memory like others!
+                "signals_rejected": memory_metrics["signals_rejected"],
+                
+                # Use database for these aggregated metrics
                 "signals_forwarded_success": db_analytics.get("forwarded_success", 0),
                 "signals_forwarded_error": db_analytics.get("forwarded_error", 0),
-                "metrics_start_time": shared_state["signal_metrics"]["metrics_start_time"],
+                
+                # Always use memory for these real-time values
+                "metrics_start_time": memory_metrics["metrics_start_time"],
                 "approved_queue_size": approved_queue_size,
                 "processing_queue_size": processing_queue_size,
-                "forwarding_workers_active": shared_state["signal_metrics"]["forwarding_workers_active"]
+                "forwarding_workers_active": memory_metrics["forwarding_workers_active"],
+                "data_source": "hybrid_memory_db"
             }
+            _logger.debug(f"📊 METRICS: Using HYBRID metrics - approved: {metrics['signals_approved']} (from memory)")
         else:
-            # Fallback to memory metrics
+            # Fallback to memory metrics (these are reset on restart)
             metrics = shared_state["signal_metrics"].copy()
             metrics["approved_queue_size"] = approved_queue_size
             metrics["processing_queue_size"] = processing_queue_size
+            metrics["data_source"] = "memory_fallback" if not force_memory else "memory_forced"
+            _logger.debug(f"🧠 METRICS: Using MEMORY metrics - approved: {metrics['signals_approved']} (source: {metrics['data_source']})")
         
         return metrics
     except Exception as e:
-        _logger.error(f"Error getting current metrics: {e}")
+        _logger.error(f"❌ METRICS: Error getting current metrics: {e}")
         # Return safe defaults
         default_metrics = signal_metrics.copy()
         default_metrics["approved_queue_size"] = 0
         default_metrics["processing_queue_size"] = 0
+        default_metrics["data_source"] = "error_fallback"
         return default_metrics
 
 async def update_cached_metrics():
     """Update cached metrics from database (called by periodic task)."""
     try:
+        # Skip updating cache if we're in force memory mode (recently reset)
+        force_memory = shared_state.get("signal_metrics", {}).get("_force_memory_metrics", False)
+        if force_memory:
+            _logger.debug("⏭️ CACHE UPDATE: Skipping cache update (force memory mode active)")
+            return
+            
+        _logger.debug("🔄 CACHE UPDATE: Updating cached metrics from database...")
         db_analytics = await db_manager.get_system_analytics()
+        
+        # Store cached analytics with timestamp
         get_current_metrics._cached_analytics = db_analytics
+        get_current_metrics._cached_timestamp = time.time()
+        
+        _logger.debug(f"✅ CACHE UPDATE: Updated cached metrics - total: {db_analytics.get('total_signals', 0)}, approved: {db_analytics.get('approved_signals', 0)}")
+        
     except Exception as e:
-        _logger.error(f"Error updating cached metrics: {e}")
+        _logger.error(f"❌ CACHE UPDATE: Error updating cached metrics from database: {e}")
+        # Don't fail completely - keep using existing cache if available
+        if not hasattr(get_current_metrics, '_cached_analytics'):
+            # If no cache exists, create empty cache so get_current_metrics knows to use memory fallback
+            get_current_metrics._cached_analytics = {}
+            get_current_metrics._cached_timestamp = time.time()
+            _logger.warning("🔧 CACHE UPDATE: Created empty cache as fallback")
 
 # ---------------------------------------------------------------------------- #
 # Globals & Shared State                                                       #
@@ -227,18 +275,22 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
                 # Check if ticker is in top-N list
                 if normalised_ticker in current_tickers:
                     # Approve signal
-                    _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Signal APPROVED - ticker {normalised_ticker} is in top-N list")
-                    
                     shared_state["signal_metrics"]["signals_approved"] += 1
-                      # Log approval event to database
-                    try:                        await db_manager.log_signal_event(
+                    current_approved_count = shared_state["signal_metrics"]["signals_approved"]
+                    
+                    _logger.info(f"✅ [WORKER {worker_id}] [SIGNAL: {signal_id}] Signal APPROVED - ticker {normalised_ticker} is in top-N list (total approved: {current_approved_count})")
+                    
+                    # Log approval event to database
+                    try:
+                        await db_manager.log_signal_event(
                             signal_id=signal_id,
                             event_type=SignalStatusEnum.APPROVED,
                             details=f"Signal approved - ticker {normalised_ticker} found in top-{len(current_tickers)} list",
                             worker_id=f"queue_worker_{worker_id}"
                         )
+                        _logger.debug(f"📝 [WORKER {worker_id}] [SIGNAL: {signal_id}] Approval logged to database")
                     except Exception as db_error:
-                        _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log approval to database: {db_error}")
+                        _logger.error(f"❌ [WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log approval to database: {db_error}")
                     
                     # Prepare data for approved queue
                     approved_signal_data = {
@@ -327,7 +379,7 @@ async def _forwarding_worker(worker_id: int) -> None:
             signal_id = signal.signal_id
             
             _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Forwarding signal for ticker: {signal.normalised_ticker()}")
-              # Log forwarding event to database
+            # Log forwarding event to database
             try:
                 await db_manager.log_signal_event(
                     signal_id=signal_id,
@@ -338,7 +390,19 @@ async def _forwarding_worker(worker_id: int) -> None:
                 )
                 _logger.debug(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Event logged to database: FORWARDING")
             except Exception as db_error:
-                _logger.error(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Error logging to database: {db_error}")
+                _logger.error(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Error logging FORWARDING status to database: {db_error}")
+                # Try to log with a fallback status if the FORWARDING enum fails
+                try:
+                    await db_manager.log_signal_event(
+                        signal_id=signal_id,
+                        event_type=SignalStatusEnum.PROCESSING,  # Fallback status
+                        location=SignalLocationEnum.WORKER_FORWARDING,
+                        details=f"Signal forwarding started (fallback log due to enum error: {db_error})",
+                        worker_id=f"forwarding_worker_{worker_id}"
+                    )
+                    _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Logged with fallback status PROCESSING")
+                except Exception as fallback_error:
+                    _logger.error(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Even fallback logging failed: {fallback_error}")
                 # Continue processing even if database logging fails
             
             try:
@@ -397,15 +461,25 @@ async def _forwarding_worker(worker_id: int) -> None:
                 shared_state["signal_metrics"]["signals_forwarded_error"] += 1
                 
                 # Determine the appropriate error status based on exception type
-                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
-                    # HTTP error
-                    error_status = SignalStatusEnum.FORWARDED_HTTP_ERROR
-                    http_status = e.response.status_code
-                else:
-                    # Generic error (timeout, network, etc.)
-                    error_status = SignalStatusEnum.FORWARDED_GENERIC_ERROR
-                    http_status = None
-                  # Log error event to database
+                error_status = None
+                http_status = None
+                
+                try:
+                    if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                        # HTTP error
+                        error_status = SignalStatusEnum.FORWARDED_HTTP_ERROR
+                        http_status = e.response.status_code
+                    else:
+                        # Generic error (timeout, network, etc.)
+                        error_status = SignalStatusEnum.FORWARDED_GENERIC_ERROR
+                        http_status = None
+                except AttributeError as enum_error:
+                    _logger.error(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Error accessing SignalStatusEnum: {enum_error}")
+                    # Fallback to a basic error status
+                    error_status = SignalStatusEnum.ERROR
+                    http_status = getattr(e, 'response', {}).get('status_code', None) if hasattr(e, 'response') else None
+                
+                # Log error event to database with enhanced error handling
                 try:
                     await db_manager.log_signal_event(
                         signal_id=signal_id,
@@ -416,8 +490,24 @@ async def _forwarding_worker(worker_id: int) -> None:
                         error_info={"type": "forwarding_error", "message": str(e)},
                         http_status=http_status
                     )
+                    _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Error logged to database with status: {error_status}")
+                    
                 except Exception as db_error:
                     _logger.error(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log error to database: {db_error}")
+                    
+                    # Ultimate fallback - try to log with basic ERROR status
+                    try:
+                        await db_manager.log_signal_event(
+                            signal_id=signal_id,
+                            event_type=SignalStatusEnum.ERROR,  # Basic error status that should always exist
+                            location=SignalLocationEnum.COMPLETED,
+                            details=f"Forwarding failed: {str(e)} (DB error: {str(db_error)})",
+                            worker_id=f"forwarding_worker_{worker_id}"
+                        )
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Error logged with fallback ERROR status")
+                    except Exception as ultimate_error:
+                        _logger.error(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Ultimate fallback logging failed: {ultimate_error}")
+                        # At this point, we've tried everything - just continue
             
             finally:
                 shared_state["signal_metrics"]["forwarding_workers_active"] -= 1
@@ -981,10 +1071,16 @@ async def receive_signal(signal: Signal, _bg: BackgroundTasks):
     try:        # Increment received signals counter
         shared_state["signal_metrics"]["signals_received"] += 1
         
+        # Determine signal type based on side
+        from database.simple_models import SignalTypeEnum
+        signal_type = SignalTypeEnum.BUY  # Default
+        if signal.side and signal.side.lower() == 'sell':
+            signal_type = SignalTypeEnum.SELL
+        
         # Persist signal to database
         try:
-            await db_manager.create_signal_with_initial_event(signal)
-            _logger.info(f"[SIGNAL: {signal.signal_id}] Persisted initial signal record to database.")
+            await db_manager.create_signal_with_initial_event(signal, signal_type)
+            _logger.info(f"[SIGNAL: {signal.signal_id}] Persisted initial signal record to database with type: {signal_type.value}")
         except Exception as db_error:
             _logger.error(f"[SIGNAL: {signal.signal_id}] FAILED to persist signal to database: {db_error}")
             # Continue processing even if database fails
@@ -1029,9 +1125,19 @@ async def update_finviz_engine_config(payload: dict = Body(...)):
         _logger.error("FinvizEngine not initialized. Cannot update config.")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="FinvizEngine not available.")
 
-    # Validate payload structure before passing to engine (optional, engine also validates)
-    allowed_keys = {"url", "top_n", "refresh"}
-    update_data = {k: v for k, v in payload.items() if k in allowed_keys and v is not None}
+    # Validate payload structure and map frontend field names to engine field names
+    # Frontend sends: finviz_url, top_n, refresh_interval_sec
+    # Engine expects: url, top_n, refresh
+    field_mapping = {
+        "finviz_url": "url",
+        "top_n": "top_n", 
+        "refresh_interval_sec": "refresh"
+    }
+    
+    update_data = {}
+    for frontend_key, engine_key in field_mapping.items():
+        if frontend_key in payload and payload[frontend_key] is not None:
+            update_data[engine_key] = payload[frontend_key]
 
     if not update_data:
         _logger.info("Received /finviz/config request with no updatable fields.")
@@ -1091,7 +1197,9 @@ async def reset_signal_metrics(payload: dict = Body(...)):
         _logger.warning("Invalid token received for /admin/metrics/reset.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
 
-    # Reset all counters
+    _logger.info("🔄 METRICS RESET: Starting metrics reset operation...")
+
+    # Reset all in-memory counters
     shared_state["signal_metrics"]["signals_received"] = 0
     shared_state["signal_metrics"]["signals_approved"] = 0
     shared_state["signal_metrics"]["signals_rejected"] = 0
@@ -1100,6 +1208,19 @@ async def reset_signal_metrics(payload: dict = Body(...)):
     shared_state["signal_metrics"]["forwarding_workers_active"] = 0  # Reset active workers counter
     shared_state["signal_metrics"]["metrics_start_time"] = time.time()
     
+    # CRITICAL FIX: Invalidate database cache to force using memory metrics after reset
+    # This ensures that the reset is immediately visible in the UI
+    if hasattr(get_current_metrics, '_cached_analytics'):
+        delattr(get_current_metrics, '_cached_analytics')
+        _logger.info("🗑️ METRICS RESET: Database cache invalidated - will use memory metrics")
+    
+    if hasattr(get_current_metrics, '_cached_timestamp'):
+        delattr(get_current_metrics, '_cached_timestamp')
+    
+    # Add a flag to indicate this was an intentional reset (not a DB failure)
+    shared_state["signal_metrics"]["_reset_timestamp"] = time.time()
+    shared_state["signal_metrics"]["_force_memory_metrics"] = True
+    
     # Reset webhook rate limiter metrics if available
     rate_limiter: Optional[WebhookRateLimiter] = shared_state.get("webhook_rate_limiter_instance")
     if rate_limiter and "webhook_rate_limiter" in shared_state:
@@ -1107,7 +1228,7 @@ async def reset_signal_metrics(payload: dict = Body(...)):
         shared_state["webhook_rate_limiter"]["requests_made_this_minute"] = 0
         _logger.info("Webhook rate limiter metrics reset")
     
-    _logger.info("Signal metrics counters reset")
+    _logger.info("✅ METRICS RESET: All signal metrics counters reset successfully")
     
     # Broadcast reset metrics to admin clients
     await comm_engine.broadcast("metrics_reset", get_current_metrics())
@@ -1244,7 +1365,7 @@ async def get_system_info():
         approval_rate = (approved_count / total_processed * 100) if total_processed > 0 else 0
         forward_success_rate = (db_analytics.get("forwarded_success", 0) / (db_analytics.get("forwarded_success", 0) + db_analytics.get("forwarded_error", 0)) * 100) if (db_analytics.get("forwarded_success", 0) + db_analytics.get("forwarded_error", 0)) > 0 else 0
         
-        # Real-time signal processing metrics from database
+        # Real-time signal processing metrics from database (persistent across restarts)
         signal_processing_metrics = {
             "signals_received": total_processed,
             "signals_approved": approved_count,
@@ -1300,6 +1421,17 @@ async def get_system_info():
     else:
         webhook_rate_limiter_info = {"status": "not_initialized"}
     
+    # Get pause status for frontend compatibility
+    finviz_engine_paused = False
+    webhook_rate_limiter_paused = False
+    
+    if engine:
+        finviz_engine_paused = engine.is_paused()
+    
+    if rate_limiter:
+        # Check if rate limiting is disabled (paused)
+        webhook_rate_limiter_paused = not rate_limiter.rate_limiting_enabled
+    
     return {
         "system": {
             "uptime_seconds": uptime_seconds,
@@ -1316,6 +1448,10 @@ async def get_system_info():
             "tickers_per_page": get_finviz_tickers_per_page()
         },
         "webhook_rate_limiter": webhook_rate_limiter_info,
+        # Frontend compatibility fields
+        "finviz_engine_paused": finviz_engine_paused,
+        "webhook_rate_limiter_paused": webhook_rate_limiter_paused,
+        "finviz_ticker_count": len(shared_state.get("tickers", set())),
         "timestamp": time.time(),
         "data_source": signal_processing_metrics.get("data_source", "unknown")
     }
@@ -1333,7 +1469,16 @@ async def sell_individual_order(payload: SellIndividualPayload):
     # Create Signal object
     signal_to_queue = Signal(ticker=payload.ticker, side='sell') # Using side='sell'
 
-    # Create signal tracker for administrative signals
+    # Create signal in database with correct type
+    from database.simple_models import SignalTypeEnum
+    try:
+        signal_id = await db_manager.create_signal_with_initial_event(signal_to_queue, SignalTypeEnum.MANUAL_SELL)
+        _logger.info(f"Manual sell signal created in database with ID: {signal_id}")
+    except Exception as e:
+        _logger.error(f"Error creating signal in database: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating signal: {str(e)}")
+
+    # Create signal tracker for administrative signals (legacy compatibility)
     tracker = create_signal_tracker(signal_to_queue)
     shared_state["signal_trackers"][signal_to_queue.signal_id] = tracker
     
@@ -1410,7 +1555,16 @@ async def sell_all_orders(payload: TokenPayload):
                     time=datetime.utcnow().isoformat() + 'Z'
                 )
                 
-                # Create tracker for this signal
+                # Create signal in database with correct type
+                from database.simple_models import SignalTypeEnum
+                try:
+                    signal_id = await db_manager.create_signal_with_initial_event(signal_to_queue, SignalTypeEnum.SELL_ALL)
+                    _logger.info(f"Sell-all signal created in database with ID: {signal_id}")
+                except Exception as db_error:
+                    _logger.error(f"Error creating sell-all signal in database: {db_error}")
+                    continue
+                
+                # Create tracker for this signal (legacy compatibility)
                 tracker = create_signal_tracker(signal_to_queue)
                 shared_state["signal_trackers"][signal_to_queue.signal_id] = tracker
                 
@@ -1548,7 +1702,8 @@ async def get_admin_audit_trail(
     status_filter: str = None, 
     ticker: str = None, 
     hours: int = None,
-    signal_id: str = None
+    signal_id: str = None,
+    signal_type: str = None  # NEW: Signal type filter
 ):
     """Retorna eventos de auditoria para o painel admin com filtros melhorados."""
     try:
@@ -1562,6 +1717,8 @@ async def get_admin_audit_trail(
             filters['hours'] = hours
         if signal_id:
             filters['signal_id_filter'] = signal_id
+        if signal_type:  # NEW: Pass signal type filter
+            filters['signal_type_filter'] = signal_type
             
         _logger.info(f"Audit trail request - limit: {limit}, offset: {offset}, filters: {filters}")
         

@@ -436,6 +436,14 @@ class FinvizEngine:
                 
                 _logger.info(f"Successfully updated tickers: {len(new_tickers)} symbols. Shared state updated.")
                 await self.admin_ws_broadcaster(event_type="finviz_update_ok", data={"count": len(new_tickers)})
+                # Broadcast Top-N tickers update para WebSocket
+                from comm_engine import comm_engine
+                top_n_data = {
+                    "tickers": sorted(list(new_tickers)),
+                    "count": len(new_tickers),
+                    "last_update": self.last_successful_update,
+                }
+                await comm_engine.trigger_top_n_tickers_update(top_n_data)
                 # Send complete status update using centralized comm_engine
                 await self._broadcast_status_update()
             else:

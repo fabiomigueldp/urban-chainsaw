@@ -17,10 +17,21 @@ class SignalStatusEnum(enum.Enum):
     REJECTED = "rejected"
     FORWARDED_SUCCESS = "forwarded_success"
     FORWARDED_ERROR = "forwarded_error"
+    FORWARDED_HTTP_ERROR = "forwarded_http_error"
+    FORWARDED_GENERIC_ERROR = "forwarded_generic_error"
+    FORWARDED_TIMEOUT = "forwarded_timeout"
     ERROR = "error"
     PROCESSING = "processing"
     QUEUED_FORWARDING = "queued_forwarding"
+    FORWARDING = "forwarding"
     DISCARDED = "discarded"
+
+class SignalTypeEnum(enum.Enum):
+    """Type of signal - distinguishes between different signal sources and types."""
+    BUY = "buy"
+    SELL = "sell" 
+    MANUAL_SELL = "manual_sell"
+    SELL_ALL = "sell_all"
 
 class SignalLocationEnum(enum.Enum):
     """Localização atual do sinal no sistema."""
@@ -52,6 +63,9 @@ class Signal(Base):
     
     # Status tracking - STRING no banco, ENUM no Python
     status = Column(String(30), nullable=False, index=True)
+    
+    # Signal type - NEW: distinguish between buy, sell, manual_sell, sell_all
+    signal_type = Column(String(20), nullable=False, default='buy', index=True)
     
     # Timestamps
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now(), index=True)

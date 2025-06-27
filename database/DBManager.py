@@ -22,7 +22,7 @@ from sqlalchemy.orm import selectinload
 # Importações do seu projeto
 from config import settings
 from models import Signal as SignalPayload, SignalTracker, AuditTrailQuery, AuditTrailResponse
-from database.simple_models import Base, Signal, SignalEvent, SignalStatusEnum, SignalLocationEnum, MetricPeriodEnum
+from database.simple_models import Base, Signal, SignalEvent, SignalStatusEnum, SignalLocationEnum, MetricPeriodEnum, SignalTypeEnum
 
 _logger = logging.getLogger("DBManager")
 
@@ -83,7 +83,7 @@ class DBManager:
 
     # --- Métodos de Lógica de Negócio (API Pública do Manager) ---
     
-    async def create_signal_with_initial_event(self, signal_payload: SignalPayload) -> str:
+    async def create_signal_with_initial_event(self, signal_payload: SignalPayload, signal_type: SignalTypeEnum = SignalTypeEnum.BUY) -> str:
         """
         Cria um novo registro de sinal e seu primeiro evento 'RECEIVED'.
         Esta é a principal função a ser chamada quando um novo sinal chega.
@@ -97,7 +97,8 @@ class DBManager:
                 side=signal_payload.side,
                 price=signal_payload.price,
                 original_signal=signal_payload.dict(),
-                status=SignalStatusEnum.RECEIVED.value  # Enum -> string para DB
+                status=SignalStatusEnum.RECEIVED.value,  # Enum -> string para DB
+                signal_type=signal_type.value  # NEW: Set signal type
             )
 
             initial_event = SignalEvent(
@@ -405,6 +406,7 @@ class DBManager:
         status_filter: Optional[str] = None,
         ticker_filter: Optional[str] = None,
         signal_id_filter: Optional[str] = None,
+        signal_type_filter: Optional[str] = None,  # NEW: Signal type filter
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         hours: Optional[int] = None,
@@ -424,6 +426,7 @@ class DBManager:
             status=status_filter,
             ticker=ticker_filter,
             signal_id=signal_id_filter,
+            signal_type=signal_type_filter,  # NEW: Pass signal type filter
             start_time=start_time.isoformat() + 'Z' if start_time else None,
             end_time=end_time.isoformat() + 'Z' if end_time else None,
             include_events=True,
@@ -443,6 +446,7 @@ class DBManager:
         event_types: Optional[List[str]] = None,
         status_filter: Optional[str] = None,
         ticker_filter: Optional[str] = None,
+        signal_type_filter: Optional[str] = None,  # NEW: Signal type filter
         hours: Optional[int] = None,
         **kwargs  # Accept additional parameters for backward compatibility
     ) -> int:
@@ -466,6 +470,8 @@ class DBManager:
                 query = query.where(Signal.signal_id.cast(String).ilike(f'%{signal_id_filter}%'))
             if status_filter:
                 query = query.where(Signal.status == status_filter)
+            if signal_type_filter:  # NEW: Filter by signal type
+                query = query.where(Signal.signal_type == signal_type_filter)
             if ticker_filter:
                 # Filter by ticker field in Signal table
                 query = query.where(Signal.ticker.ilike(f'%{ticker_filter}%'))
@@ -593,6 +599,9 @@ class DBManager:
         if p.status and p.status != 'all':
             # Agora usando strings diretamente
             filters.append(Signal.status == p.status)
+        if p.signal_type and p.signal_type != 'all':
+            # NEW: Filter by signal type
+            filters.append(Signal.signal_type == p.signal_type)
         if p.start_time:
             filters.append(Signal.created_at >= datetime.fromisoformat(p.start_time.replace('Z', '+00:00')))
         if p.end_time:
@@ -664,6 +673,8 @@ class DBManager:
             "timestamp": safe_datetime_format(signal.updated_at),
             "status": getattr(signal, 'status', None) or 'unknown',
             "status_display": (getattr(signal, 'status', '') or '').replace('_', ' ').title() or 'Unknown',
+            "signal_type": getattr(signal, 'signal_type', None) or 'buy',
+            "signal_type_display": (getattr(signal, 'signal_type', '') or '').replace('_', ' ').title() or 'Buy',
             "created_at": safe_datetime_format(signal.created_at),
             "updated_at": safe_datetime_format(signal.updated_at),
             "processing_time_ms": getattr(signal, 'processing_time_ms', None),

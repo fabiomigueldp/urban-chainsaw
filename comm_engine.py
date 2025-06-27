@@ -301,6 +301,13 @@ class CommunicationEngine:
         """Trigger new audit entry broadcast."""
         await self.broadcast_new_audit_entry(audit_entry)
 
+    async def trigger_top_n_tickers_update(self, data: Optional[Dict[str, Any]] = None):
+        """Trigger top-N tickers update broadcast."""
+        if data is None:
+            _logger.warning("trigger_top_n_tickers_update called without data")
+            return
+        await self.broadcast("top_n_tickers_update", data)
+
     # === NEW REQUIRED METHODS FOR ADMIN INTERFACE ===
 
     async def trigger_metrics_update(self, metrics: Dict[str, Any]):
