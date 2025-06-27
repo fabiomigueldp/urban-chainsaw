@@ -11,7 +11,7 @@ import uuid
 Base = declarative_base()
 
 class SignalStatusEnum(enum.Enum):
-    """Status do sinal durante o processamento - HÍBRIDO: Enum no Python, String no DB."""
+    """Signal status during processing - HYBRID: Enum in Python, String in DB."""
     RECEIVED = "received"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -34,7 +34,7 @@ class SignalTypeEnum(enum.Enum):
     SELL_ALL = "sell_all"
 
 class SignalLocationEnum(enum.Enum):
-    """Localização atual do sinal no sistema."""
+    """Current signal location in the system."""
     PROCESSING_QUEUE = "processing_queue"
     APPROVED_QUEUE = "approved_queue"
     WORKER_PROCESSING = "worker_processing"
@@ -43,13 +43,13 @@ class SignalLocationEnum(enum.Enum):
     DISCARDED = "discarded"
 
 class MetricPeriodEnum(enum.Enum):
-    """Períodos para métricas e análises."""
+    """Periods for metrics and analysis."""
     MINUTE = "minute"
     HOUR = "hour"
     DAY = "day"
 
 class Signal(Base):
-    """Simple signal tracking table - HÍBRIDO: Campos string no DB, enums no Python."""
+    """Simple signal tracking table - HYBRID: String fields in DB, enums in Python."""
     __tablename__ = "signals"
     
     # Primary key
@@ -61,7 +61,7 @@ class Signal(Base):
     side = Column(String(10))
     price = Column(Float)
     
-    # Status tracking - STRING no banco, ENUM no Python
+    # Status tracking - STRING in database, ENUM in Python
     status = Column(String(30), nullable=False, index=True)
     
     # Signal type - NEW: distinguish between buy, sell, manual_sell, sell_all
@@ -77,20 +77,20 @@ class Signal(Base):
     # Performance tracking
     processing_time_ms = Column(Integer)  # milliseconds
     error_message = Column(Text)
-    retry_count = Column(Integer, default=0)  # Para controle de retentativas
+    retry_count = Column(Integer, default=0)  # For retry control
     
     # Events
     events = relationship("SignalEvent", back_populates="signal", cascade="all, delete-orphan")
 
 class SignalEvent(Base):
-    """Simple event tracking - HÍBRIDO: Campos string no DB, enums no Python."""
+    """Simple event tracking - HYBRID: String fields in DB, enums in Python."""
     __tablename__ = "signal_events"
     
     event_id = Column(BigInteger, primary_key=True, autoincrement=True)
     signal_id = Column(UUID(as_uuid=True), ForeignKey('signals.signal_id'), nullable=False, index=True)
     
     timestamp = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
-    status = Column(String(30), nullable=False)  # STRING no banco
+    status = Column(String(30), nullable=False)  # STRING in database
     details = Column(Text)
     worker_id = Column(String(50))
     

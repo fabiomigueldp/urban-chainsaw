@@ -289,11 +289,18 @@
                         </div>
                         <div class="progress-container">
                             <div class="d-flex justify-content-between small">
-                                <span>Active Workers:</span>
+                                <span>Processing Workers:</span>
+                                <span id="processingWorkersActive">-</span>
+                            </div>
+                            <div class="progress mb-2">
+                                <div id="processingWorkerProgress" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div class="d-flex justify-content-between small">
+                                <span>Forwarding Workers:</span>
                                 <span id="forwardingWorkersActive">-</span>
                             </div>
                             <div class="progress">
-                                <div id="workerProgress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                <div id="forwardingWorkerProgress" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
                             </div>
                         </div>
                     </div>
@@ -975,13 +982,22 @@
             document.getElementById('signalsForwarded').textContent = metrics.signals_forwarded_success || 0;
             document.getElementById('processingQueueSize').textContent = metrics.processing_queue_size || 0;
             document.getElementById('approvedQueueSize').textContent = metrics.approved_queue_size || 0;
+            document.getElementById('processingWorkersActive').textContent = metrics.processing_workers_active || 0;
             document.getElementById('forwardingWorkersActive').textContent = metrics.forwarding_workers_active || 0;
             
-            // Update worker progress bar
-            const maxWorkers = 10; // Assuming max 10 workers
-            const activeWorkers = metrics.forwarding_workers_active || 0;
-            const progressPercent = (activeWorkers / maxWorkers) * 100;
-            document.getElementById('workerProgress').style.width = `${progressPercent}%`;
+            // Update worker progress bars
+            const maxForwardingWorkers = 5;
+            const maxProcessingWorkers = 16;
+            
+            // Processing workers progress bar
+            const activeProcessingWorkers = metrics.processing_workers_active || 0;
+            const processingPercent = (activeProcessingWorkers / maxWorkers) * 100;
+            document.getElementById('processingWorkerProgress').style.width = `${processingPercent}%`;
+            
+            // Forwarding workers progress bar
+            const activeForwardingWorkers = metrics.forwarding_workers_active || 0;
+            const forwardingPercent = (activeForwardingWorkers / maxWorkers) * 100;
+            document.getElementById('forwardingWorkerProgress').style.width = `${forwardingPercent}%`;
               // Update approval chart with real data
             if (approvalChart) {
                 const approved = metrics.signals_approved || 0;

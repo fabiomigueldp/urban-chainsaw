@@ -55,5 +55,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 EXPOSE 80
 EXPOSE 8000
 
-# Production command with root privileges for maximum permissions
-CMD ["python", "-c", "import os; os.system('chmod 777 /app; chmod 666 /app/*.json || true'); exec(open('/app/main_with_permissions.py').read())"]
+# Production command with root privileges for maximum permissions  
+CMD ["sh", "-c", "chmod 777 /app && chmod 666 /app/*.json 2>/dev/null || true && uvicorn main:app --host 0.0.0.0 --port 80 --access-log --log-level info"]

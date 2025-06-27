@@ -1,6 +1,6 @@
 -- PostgreSQL initialization script for Trading Signal Processor
--- ABORDAGEM HÍBRIDA: Enums no Python, Strings no Banco
--- Schema simples e eficiente para máxima performance
+-- HYBRID APPROACH: Enums in Python, Strings in Database
+-- Simple and efficient schema for maximum performance
 
 -- Ensure we're using the correct database
 \c trading_signals;
@@ -11,11 +11,11 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Create extension for better JSON handling
 CREATE EXTENSION IF NOT EXISTS "btree_gin";
 
--- =============================================================================
--- SCHEMA SIMPLES - TABELAS PRINCIPAIS
+# =============================================================================
+-- SIMPLE SCHEMA - MAIN TABLES
 -- =============================================================================
 
--- Tabela principal de sinais
+-- Main signals table
 CREATE TABLE IF NOT EXISTS signals (
     -- Primary key
     signal_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS signals (
     side VARCHAR(10),
     price FLOAT,
     
-    -- Status tracking (STRING no banco, ENUM no Python)
+    -- Status tracking (STRING in database, ENUM in Python)
     status VARCHAR(30) NOT NULL DEFAULT 'received',
     
     -- Signal type (NEW: distinguish between buy, sell, manual_sell, sell_all)
@@ -45,22 +45,22 @@ CREATE TABLE IF NOT EXISTS signals (
     retry_count INTEGER DEFAULT 0
 );
 
--- Tabela de eventos (auditoria detalhada)
+-- Events table (detailed audit)
 CREATE TABLE IF NOT EXISTS signal_events (
     event_id BIGSERIAL PRIMARY KEY,
     signal_id UUID NOT NULL REFERENCES signals(signal_id) ON DELETE CASCADE,
     
     timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    status VARCHAR(30) NOT NULL,  -- STRING no banco
+    status VARCHAR(30) NOT NULL,  -- STRING in database
     details TEXT,
     worker_id VARCHAR(50)
 );
 
 -- =============================================================================
--- ÍNDICES PARA PERFORMANCE
+-- INDEXES FOR PERFORMANCE
 -- =============================================================================
 
--- Índices na tabela signals
+-- Indexes on signals table
 CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
 CREATE INDEX IF NOT EXISTS idx_signals_normalised_ticker ON signals(normalised_ticker);
 CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
@@ -68,19 +68,19 @@ CREATE INDEX IF NOT EXISTS idx_signals_signal_type ON signals(signal_type);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_updated_at ON signals(updated_at);
 
--- Índices na tabela signal_events
+-- Indexes on signal_events table
 CREATE INDEX IF NOT EXISTS idx_signal_events_signal_id ON signal_events(signal_id);
 CREATE INDEX IF NOT EXISTS idx_signal_events_timestamp ON signal_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signal_events_status ON signal_events(status);
 
--- Índice composto para queries comuns
+-- Composite index for common queries
 CREATE INDEX IF NOT EXISTS idx_signals_status_created ON signals(status, created_at);
 
 -- =============================================================================
--- TRIGGER PARA AUTO-UPDATE DE updated_at
+-- TRIGGER FOR AUTO-UPDATE OF updated_at
 -- =============================================================================
 
--- Função para atualizar timestamp
+-- Function to update timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -89,7 +89,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Trigger na tabela signals
+-- Trigger on signals table
 DROP TRIGGER IF EXISTS update_signals_updated_at ON signals;
 CREATE TRIGGER update_signals_updated_at
     BEFORE UPDATE ON signals
@@ -97,23 +97,23 @@ CREATE TRIGGER update_signals_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================================================
--- COMENTÁRIOS PARA DOCUMENTAÇÃO
+-- COMMENTS FOR DOCUMENTATION
 -- =============================================================================
 
-COMMENT ON DATABASE trading_signals IS 'Trading Signal Processor - Abordagem Híbrida: Enums no Python + Strings no Banco';
+COMMENT ON DATABASE trading_signals IS 'Trading Signal Processor - Hybrid Approach: Enums in Python + Strings in Database';
 
-COMMENT ON TABLE signals IS 'Tabela principal de sinais - schema simples para máxima performance';
-COMMENT ON COLUMN signals.status IS 'Status como string no banco (enum no Python para type safety)';
-COMMENT ON COLUMN signals.original_signal IS 'Payload original do sinal em formato JSON';
+COMMENT ON TABLE signals IS 'Main signals table - simple schema for maximum performance';
+COMMENT ON COLUMN signals.status IS 'Status as string in database (enum in Python for type safety)';
+COMMENT ON COLUMN signals.original_signal IS 'Original signal payload in JSON format';
 
-COMMENT ON TABLE signal_events IS 'Eventos de auditoria - rastreamento detalhado do ciclo de vida';
-COMMENT ON COLUMN signal_events.status IS 'Status do evento como string (enum no Python)';
+COMMENT ON TABLE signal_events IS 'Audit events - detailed lifecycle tracking';
+COMMENT ON COLUMN signal_events.status IS 'Event status as string (enum in Python)';
 
 -- =============================================================================
--- DADOS DE TESTE (OPCIONAL)
+-- TEST DATA (OPTIONAL)
 -- =============================================================================
 
--- Inserir sinal de teste se não existir nenhum dado
+-- Insert test signal if no data exists
 INSERT INTO signals (signal_id, ticker, normalised_ticker, side, price, status, original_signal)
 SELECT 
     'test-init-' || uuid_generate_v4()::text,
@@ -125,11 +125,11 @@ SELECT
     '{"ticker": "AAPL", "side": "BUY", "price": 150.0, "test": true}'::jsonb
 WHERE NOT EXISTS (SELECT 1 FROM signals LIMIT 1);
 
--- Log de inicialização
+-- Initialization log
 DO $$
 BEGIN
-    RAISE NOTICE '✅ Trading Signal Processor - Schema híbrido inicializado com sucesso!';
-    RAISE NOTICE '   🗄️  Tabelas: signals, signal_events';
-    RAISE NOTICE '   📊 Índices: otimizados para performance';
-    RAISE NOTICE '   🔄 Abordagem: Enums no Python + Strings no banco';
+    RAISE NOTICE '✅ Trading Signal Processor - Hybrid schema initialized successfully!';
+    RAISE NOTICE '   🗄️  Tables: signals, signal_events';
+    RAISE NOTICE '   📊 Indexes: optimized for performance';
+    RAISE NOTICE '   🔄 Approach: Enums in Python + Strings in database';
 END $$;

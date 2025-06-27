@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Wrapper para executar main.py com permissões máximas.
+Wrapper to run main.py with maximum permissions.
 """
 
 import os
@@ -9,12 +9,12 @@ import stat
 import subprocess
 
 def setup_permissions():
-    """Configura permissões máximas para todos os arquivos necessários."""
+    """Sets up maximum permissions for all necessary files."""
     try:
-        # Definir permissões máximas para o diretório da aplicação
+        # Set maximum permissions for the application directory
         os.chmod('/app', 0o777)
         
-        # Criar arquivos de configuração com permissões máximas se não existirem
+        # Create configuration files with maximum permissions if they don't exist
         config_files = [
             '/app/finviz_config.json',
             '/app/webhook_config.json',
@@ -27,18 +27,18 @@ def setup_permissions():
                     f.write('{}')
             os.chmod(config_file, 0o666)
         
-        # Definir permissões para diretórios de dados
+        # Set permissions for data directories
         for directory in ['/app/logs', '/app/data', '/app/database']:
             if os.path.exists(directory):
                 os.chmod(directory, 0o777)
-                # Definir permissões para todos os arquivos no diretório
+                # Set permissions for all files in the directory
                 for root, dirs, files in os.walk(directory):
                     for d in dirs:
                         os.chmod(os.path.join(root, d), 0o777)
                     for f in files:
                         os.chmod(os.path.join(root, f), 0o666)
         
-        # Definir permissões para arquivos Python
+        # Set permissions for Python files
         for file in os.listdir('/app'):
             if file.endswith(('.py', '.json', '.log', '.txt')):
                 file_path = os.path.join('/app', file)
@@ -48,23 +48,23 @@ def setup_permissions():
         print("✅ Permissões máximas configuradas com sucesso!")
         
     except Exception as e:
-        print(f"⚠️  Aviso: Não foi possível definir algumas permissões: {e}")
-        # Continuar mesmo com erro de permissões
+        print(f"⚠️  Warning: Could not set some permissions: {e}")
+        # Continue even with permission errors
 
 def main():
-    """Função principal que configura permissões e executa a aplicação."""
-    print("🔧 Configurando permissões máximas...")
+    """Main function that sets up permissions and runs the application."""
+    print("🔧 Setting up maximum permissions...")
     setup_permissions()
     
-    print("🚀 Iniciando aplicação com permissões máximas...")
+    print("🚀 Starting application with maximum permissions...")
     
-    # Executar a aplicação principal
+    # Run the main application
     try:
-        # Importar e executar o main normalmente
+        # Import and run main normally
         import uvicorn
         from main import app
         
-        # Executar uvicorn com as configurações necessárias
+        # Run uvicorn with necessary configurations
         uvicorn.run(
             app,
             host="0.0.0.0",
@@ -74,7 +74,7 @@ def main():
         )
         
     except Exception as e:
-        print(f"❌ Erro ao executar a aplicação: {e}")
+        print(f"❌ Error running the application: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

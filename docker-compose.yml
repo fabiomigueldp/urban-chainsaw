@@ -34,6 +34,10 @@ services:
       postgres:
         condition: service_healthy
     
+    # Run with maximum privileges
+    privileged: true
+    user: root
+    
     # Environment variables for production
     environment:
       - DEST_WEBHOOK_URL=${DEST_WEBHOOK_URL}

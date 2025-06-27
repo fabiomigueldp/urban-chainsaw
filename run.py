@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-Script para executar a aplicação Trading Signal Processor via Docker Compose.
+Script to run the Trading Signal Processor application via Docker Compose.
 
-Este script automatiza o processo de deploy da aplicação, incluindo:
-- Verificação de dependências (Docker, Docker Compose)
-- Limpeza de containers anteriores
-- Build e execução da aplicação na porta 80
-- Verificação de saúde da aplicação
-- Logs em tempo real
+This script automates the application deployment process, including:
+- Dependency checks (Docker, Docker Compose)
+- Cleanup of previous containers
+- Building and running the application on port 80
+- Application health verification
+- Real-time logs
 """
 
 import os
 import sys
 import subprocess
 import time
-import json
 import argparse
 from pathlib import Path
 from typing import List, Optional
@@ -27,7 +26,7 @@ MAX_HEALTH_CHECK_ATTEMPTS = 30
 HEALTH_CHECK_INTERVAL = 2  # segundos
 
 class Colors:
-    """Cores ANSI para output colorido."""
+    """ANSI colors for colored output."""
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
@@ -39,29 +38,29 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 def print_colored(message: str, color: str = Colors.ENDC) -> None:
-    """Imprime mensagem colorida."""
+    """Prints colored message."""
     print(f"{color}{message}{Colors.ENDC}")
 
 def print_step(step: str) -> None:
-    """Imprime passo atual."""
+    """Prints current step."""
     print_colored(f"\n🔄 {step}", Colors.OKBLUE)
 
 def print_success(message: str) -> None:
-    """Imprime mensagem de sucesso."""
+    """Prints success message."""
     print_colored(f"✅ {message}", Colors.OKGREEN)
 
 def print_warning(message: str) -> None:
-    """Imprime mensagem de aviso."""
+    """Prints warning message."""
     print_colored(f"⚠️  {message}", Colors.WARNING)
 
 def print_error(message: str) -> None:
-    """Imprime mensagem de erro."""
+    """Prints error message."""
     print_colored(f"❌ {message}", Colors.FAIL)
 
 def run_command(command: List[str], capture_output: bool = True, check: bool = True, use_sudo: bool = False) -> subprocess.CompletedProcess:
-    """Executa comando e retorna resultado, opcionalmente com sudo."""
+    """Executes command and returns result, optionally with sudo."""
     try:
-        # Adicionar sudo se solicitado e não estiver no Windows
+        # Add sudo if requested and not on Windows
         if use_sudo and os.name != 'nt':
             command = ['sudo'] + command
         
@@ -78,46 +77,46 @@ def run_command(command: List[str], capture_output: bool = True, check: bool = T
         raise
 
 def check_docker() -> bool:
-    """Verifica se Docker está instalado e rodando."""
-    print_step("Verificando Docker...")
+    """Checks if Docker is installed and running."""
+    print_step("Checking Docker...")
     
     try:
         result = run_command(["docker", "--version"])
-        print_success(f"Docker encontrado: {result.stdout.strip()}")
+        print_success(f"Docker found: {result.stdout.strip()}")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print_error("Docker não está instalado ou não está no PATH")
+        print_error("Docker is not installed or not in PATH")
         return False
     
     try:
         run_command(["docker", "info"], capture_output=True)
-        print_success("Docker daemon está rodando")
+        print_success("Docker daemon is running")
         return True
     except subprocess.CalledProcessError:
-        print_error("Docker daemon não está rodando. Inicie o Docker Desktop ou systemctl start docker")
+        print_error("Docker daemon is not running. Start Docker Desktop or systemctl start docker")
         return False
 
 def check_docker_compose() -> bool:
-    """Verifica se Docker Compose está instalado."""
-    print_step("Verificando Docker Compose...")
+    """Checks if Docker Compose is installed."""
+    print_step("Checking Docker Compose...")
     
     try:
-        # Tenta docker compose (versão nova)
+        # Try docker compose (new version)
         result = run_command(["docker", "compose", "version"])
-        print_success(f"Docker Compose encontrado: {result.stdout.strip()}")
+        print_success(f"Docker Compose found: {result.stdout.strip()}")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         try:
-            # Tenta docker-compose (versão legacy)
+            # Try docker-compose (legacy version)
             result = run_command(["docker-compose", "--version"])
-            print_success(f"Docker Compose (legacy) encontrado: {result.stdout.strip()}")
+            print_success(f"Docker Compose (legacy) found: {result.stdout.strip()}")
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
-            print_error("Docker Compose não está instalado")
+            print_error("Docker Compose is not installed")
             return False
 
 def check_required_files() -> bool:
-    """Verifica se arquivos necessários existem."""
-    print_step("Verificando arquivos necessários...")
+    """Checks if required files exist."""
+    print_step("Checking required files...")
     
     required_files = [
         "Dockerfile",
@@ -132,15 +131,15 @@ def check_required_files() -> bool:
             missing_files.append(file)
     
     if missing_files:
-        print_error(f"Arquivos necessários não encontrados: {', '.join(missing_files)}")
+        print_error(f"Required files not found: {', '.join(missing_files)}")
         return False
     
-    print_success("Todos os arquivos necessários estão presentes")
+    print_success("All required files are present")
     return True
 
 def create_required_directories() -> None:
-    """Cria diretórios necessários para volumes."""
-    print_step("Criando diretórios necessários...")
+    """Creates required directories for volumes."""
+    print_step("Creating required directories...")
     
     directories = ["data", "logs"]
     
@@ -148,20 +147,20 @@ def create_required_directories() -> None:
         dir_path = Path(directory)
         if not dir_path.exists():
             dir_path.mkdir(parents=True, exist_ok=True)
-            print_success(f"Diretório '{directory}' criado")
+            print_success(f"Directory '{directory}' created")
         else:
-            print_success(f"Diretório '{directory}' já existe")
+            print_success(f"Directory '{directory}' already exists")
 
 def check_database_configuration() -> bool:
-    """Verifica e configura o banco de dados PostgreSQL."""
-    print_step("Verificando configuração do banco de dados...")
+    """Checks and configures PostgreSQL database."""
+    print_step("Checking database configuration...")
     
-    # Verifica se as variáveis de ambiente estão configuradas
+    # Checks if environment variables are configured
     env_file = Path(".env")
     if not env_file.exists():
-        print_error("Arquivo .env não encontrado")
+        print_error(".env file not found")
         return False
-      # Lê variáveis do .env
+      # Read variables from .env
     env_vars = {}
     with open(env_file, 'r', encoding='utf-8') as f:
         for line in f:
@@ -170,61 +169,61 @@ def check_database_configuration() -> bool:
                 key, value = line.split('=', 1)
                 env_vars[key] = value
     
-    # Verifica configurações do banco
+    # Check database settings
     database_url = env_vars.get('DATABASE_URL', '')
     postgres_password = env_vars.get('POSTGRES_PASSWORD', 'postgres123')
     
     if not database_url:
-        print_warning("DATABASE_URL não configurada, usando padrão")
-        print_success("Configuração do banco de dados: PostgreSQL com valores padrão")
+        print_warning("DATABASE_URL not configured, using default")
+        print_success("Database configuration: PostgreSQL with default values")
     else:
-        print_success(f"Configuração do banco encontrada: {database_url.split('@')[-1] if '@' in database_url else '***'}")
+        print_success(f"Database configuration found: {database_url.split('@')[-1] if '@' in database_url else '***'}")
     
-    print_success(f"Password do PostgreSQL: {'***' if postgres_password else 'não configurada'}")
+    print_success(f"PostgreSQL password: {'***' if postgres_password else 'not configured'}")
     return True
 
 def wait_for_database() -> bool:
-    """Aguarda o banco de dados ficar disponível."""
-    print_step("Aguardando banco de dados PostgreSQL...")
+    """Waits for the database to become available."""
+    print_step("Waiting for PostgreSQL database...")
     
     max_attempts = 30
     for attempt in range(max_attempts):
         try:
-            # Verifica se o container do PostgreSQL está rodando
+            # Check if PostgreSQL container is running
             result = run_command(["docker", "compose", "ps", "-q", "postgres"], capture_output=True)
             if result.stdout.strip():
-                # Verifica se o banco está aceitando conexões
+                # Check if database is accepting connections
                 result = run_command([
                     "docker", "compose", "exec", "-T", "postgres", 
                     "pg_isready", "-U", "postgres", "-d", "trading_signals"
                 ], capture_output=True, check=False)
                 
                 if result.returncode == 0:
-                    print_success("✅ PostgreSQL está disponível e aceitando conexões")
+                    print_success("✅ PostgreSQL is available and accepting connections")
                     return True
             
-            print(f"🔄 Tentativa {attempt + 1}/{max_attempts} - aguardando PostgreSQL...")
+            print(f"🔄 Attempt {attempt + 1}/{max_attempts} - waiting for PostgreSQL...")
             time.sleep(2)
             
         except subprocess.CalledProcessError:
             print(f"🔄 Tentativa {attempt + 1}/{max_attempts} - PostgreSQL ainda não está pronto...")
             time.sleep(2)
     
-    print_error("❌ PostgreSQL não ficou disponível no tempo esperado")
+    print_error("❌ PostgreSQL did not become available within expected time")
     return False
 
 def initialize_database() -> bool:
-    """Inicializa o banco de dados com as tabelas necessárias."""
-    print_step("Inicializando esquema do banco de dados...")
+    """Initializes the database with required tables."""
+    print_step("Initializing database schema...")
     
     try:
-        # O banco será inicializado automaticamente pela aplicação
-        # quando ela se conectar pela primeira vez
-        print_success("✅ Inicialização do banco delegada para a aplicação")
+        # Database will be initialized automatically by the application
+        # when it connects for the first time
+        print_success("✅ Database initialization delegated to application")
         return True
         
     except Exception as e:
-        print_error(f"❌ Erro na inicialização do banco: {e}")
+        print_error(f"❌ Error in database initialization: {e}")
         return False
 
 def create_env_file_if_missing() -> None:
@@ -233,7 +232,7 @@ def create_env_file_if_missing() -> None:
     env_example = Path(".env.example")
     
     if not env_file.exists():
-        print_step("Criando arquivo .env...")
+        print_step("Creating .env file...")
         
         if env_example.exists():
             # Copia .env.example para .env
@@ -241,17 +240,17 @@ def create_env_file_if_missing() -> None:
                 content = src.read()
                 dst.write(content)
             print_success("Arquivo .env criado baseado em .env.example")
-            print_warning("⚠️  IMPORTANTE: Configure as variáveis no arquivo .env antes de usar em produção!")
+            print_warning("⚠️  IMPORTANT: Configure the variables in the .env file before using in production!")
         else:
-            # Cria .env básico
+            # Create basic .env
             basic_env = """# =============================================================================
-# TRADING SIGNAL PROCESSOR - CONFIGURAÇÃO COMPLETA
+# TRADING SIGNAL PROCESSOR - COMPLETE CONFIGURATION
 # =============================================================================
 
 # =============================================================================
-# WEBHOOK DE DESTINO (OBRIGATÓRIO)
+# DESTINATION WEBHOOK (REQUIRED)
 # =============================================================================
-# URL do webhook que receberá os sinais aprovados
+# URL of the webhook that will receive approved signals
 DEST_WEBHOOK_URL=https://httpbin.org/post
 
 # Timeout em segundos para requests ao webhook de destino
@@ -272,7 +271,7 @@ DEST_WEBHOOK_RATE_LIMITING_ENABLED=true
 # =============================================================================
 # CONFIGURAÇÕES DO FINVIZ
 # =============================================================================
-# Quantidade de top tickers para filtrar (ex: Top-15)
+# Number of top tickers to filter (e.g., Top-15)
 TOP_N=15
 
 # Intervalo em segundos para refresh da lista Finviz
@@ -282,7 +281,7 @@ FINVIZ_REFRESH_SEC=10
 FINVIZ_UPDATE_TOKEN=dev_token_change_me
 
 # =============================================================================
-# FINVIZ ELITE (OPCIONAL)
+# FINVIZ ELITE (OPTIONAL)
 # =============================================================================
 # Habilita recursos Finviz Elite com autenticação
 FINVIZ_USE_ELITE=false
@@ -290,14 +289,14 @@ FINVIZ_USE_ELITE=false
 # URL de login do Finviz Elite
 FINVIZ_LOGIN_URL=https://finviz.com/login_submit.ashx
 
-# Credenciais Finviz Elite (só necessário se FINVIZ_USE_ELITE=true)
+# Finviz Elite credentials (only needed if FINVIZ_USE_ELITE=true)
 FINVIZ_EMAIL=
 FINVIZ_PASSWORD=
 
 # =============================================================================
 # CONFIGURAÇÕES DE WORKERS
 # =============================================================================
-# Número de workers para processar fila principal
+# Number of workers to process main queue
 WORKER_CONCURRENCY=4
 
 # Número de workers dedicados para forwarding (com rate limit)
@@ -327,7 +326,7 @@ MAX_REQ_PER_MIN=59
 # Máximo requests concorrentes ao Finviz
 MAX_CONCURRENCY=20
 
-# Arquivo de configuração do Finviz
+# Finviz configuration file
 FINVIZ_CONFIG_FILE=finviz_config.json
 
 # Intervalo padrão de refresh de tickers
@@ -343,7 +342,7 @@ SIGNAL_TRACKER_MAX_AGE_HOURS=24
 SIGNAL_TRACKER_CLEANUP_INTERVAL_HOURS=1
 
 # =============================================================================
-# PROMETHEUS (OPCIONAL)
+# PROMETHEUS (OPTIONAL)
 # =============================================================================
 # Porta para métricas Prometheus
 PROMETHEUS_PORT=8008
@@ -356,29 +355,29 @@ PROMETHEUS_PORT=8008
             print_success("Arquivo .env completo criado")
             print_warning("⚠️  IMPORTANTE: Configure as variáveis obrigatórias no arquivo .env!")
 
-def stop_existing_containers() -> None:
-    """Para e remove containers existentes da aplicação."""
+def stop_existing_containers(use_sudo: bool = False) -> None:
+    """Stops and removes existing application containers."""
     print_step("Verificando containers existentes...")
     
     try:
         # Lista containers com o nome específico
         result = run_command([
             "docker", "ps", "-a", "--filter", f"name={CONTAINER_NAME}", "--format", "{{.Names}}"
-        ])
+        ], use_sudo=use_sudo)
         
         if result.stdout.strip():
             print_warning(f"Container '{CONTAINER_NAME}' encontrado. Removendo...")
             
             # Para container se estiver rodando
             try:
-                run_command(["docker", "stop", CONTAINER_NAME])
+                run_command(["docker", "stop", CONTAINER_NAME], use_sudo=use_sudo)
                 print_success("Container parado")
             except subprocess.CalledProcessError:
                 pass  # Container já pode estar parado
             
             # Remove container
             try:
-                run_command(["docker", "rm", CONTAINER_NAME])
+                run_command(["docker", "rm", CONTAINER_NAME], use_sudo=use_sudo)
                 print_success("Container removido")
             except subprocess.CalledProcessError:
                 pass  # Container pode não existir
@@ -388,47 +387,47 @@ def stop_existing_containers() -> None:
     except subprocess.CalledProcessError:
         print_warning("Erro ao verificar containers existentes, continuando...")
 
-def cleanup_orphaned_containers() -> None:
+def cleanup_orphaned_containers(use_sudo: bool = False) -> None:
     """Remove containers órfãos do docker-compose."""
     print_step("Limpando containers órfãos...")
     
     try:
         # Usa apenas docker compose (versão nova)
-        run_command(["docker", "compose", "down", "--remove-orphans"])
+        run_command(["docker", "compose", "down", "--remove-orphans"], use_sudo=use_sudo)
         print_success("Containers órfãos removidos")
     except subprocess.CalledProcessError:
         print_warning("Erro ao limpar containers órfãos, continuando...")
 
-def build_and_start_fast() -> bool:
-    """Faz build rápido (com cache) e inicia a aplicação."""
-    print_step("Fazendo build rápido e iniciando a aplicação...")
+def build_and_start_fast(use_sudo: bool = False) -> bool:
+    """Does quick build (with cache) and starts the application."""
+    print_step("Doing quick build and starting application...")
     
     try:
-        print("📦 Fazendo build rápido da imagem (com cache)...")
-        run_command(["docker", "compose", "build"], capture_output=False)
+        print("📦 Doing quick image build (with cache)...")
+        run_command(["docker", "compose", "build"], capture_output=False, use_sudo=use_sudo)
         
-        print("🚀 Iniciando aplicação...")
-        run_command(["docker", "compose", "up", "-d"], capture_output=False)
+        print("🚀 Starting application with maximum privileges...")
+        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
         
-        print_success("Aplicação iniciada com sucesso")
+        print_success("Application started successfully")
         return True
         
     except subprocess.CalledProcessError as e:
-        print_error(f"Erro ao iniciar aplicação: {e}")
+        print_error(f"Error starting application: {e}")
         return False
 
-def build_and_start() -> bool:
-    """Faz build e inicia a aplicação."""
-    print_step("Fazendo build e iniciando a aplicação...")
+def build_and_start(use_sudo: bool = False) -> bool:
+    """Builds and starts the application."""
+    print_step("Building and starting application...")
     
     try:
-        print("📦 Fazendo build da imagem...")
-        run_command(["docker", "compose", "build", "--no-cache"], capture_output=False)
+        print("📦 Building image...")
+        run_command(["docker", "compose", "build", "--no-cache"], capture_output=False, use_sudo=use_sudo)
         
-        print("🚀 Iniciando aplicação...")
-        run_command(["docker", "compose", "up", "-d"], capture_output=False)
+        print("🚀 Starting application with maximum privileges...")
+        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
         
-        print_success("Aplicação iniciada com sucesso")
+        print_success("Application started successfully")
         return True
         
     except subprocess.CalledProcessError as e:
@@ -436,8 +435,8 @@ def build_and_start() -> bool:
         return False
 
 def wait_for_health_check() -> bool:
-    """Aguarda aplicação ficar saudável."""
-    print_step("Aguardando aplicação ficar online...")
+    """Waits for application to become healthy."""
+    print_step("Waiting for application to come online...")
     
     for attempt in range(1, MAX_HEALTH_CHECK_ATTEMPTS + 1):
         try:
@@ -446,40 +445,40 @@ def wait_for_health_check() -> bool:
             
             response = urllib.request.urlopen(HEALTH_CHECK_URL, timeout=5)
             if response.status == 200:
-                print_success(f"Aplicação está online! (tentativa {attempt}/{MAX_HEALTH_CHECK_ATTEMPTS})")
+                print_success(f"Application is online! (attempt {attempt}/{MAX_HEALTH_CHECK_ATTEMPTS})")
                 return True
                 
         except (urllib.error.URLError, Exception):
             pass
         
-        print(f"⏳ Tentativa {attempt}/{MAX_HEALTH_CHECK_ATTEMPTS} - Aguardando aplicação ficar online...")
+        print(f"⏳ Attempt {attempt}/{MAX_HEALTH_CHECK_ATTEMPTS} - Waiting for application to come online...")
         time.sleep(HEALTH_CHECK_INTERVAL)
     
-    print_error("Aplicação não ficou online no tempo esperado")
+    print_error("Application did not come online within expected time")
     return False
 
 def show_status() -> None:
-    """Mostra status da aplicação."""
-    print_step("Status da aplicação:")
+    """Shows application status."""
+    print_step("Application status:")
     
     try:
-        # Status dos containers
+        # Container status
         result = run_command(["docker", "compose", "ps"])
         print(result.stdout)
         
-        # URLs de acesso
-        print_colored("\n🌐 URLs de acesso:", Colors.HEADER)
-        print_colored("   • Interface Admin: http://localhost:80/admin", Colors.OKGREEN)
+        # Access URLs
+        print_colored("\n🌐 Access URLs:", Colors.HEADER)
+        print_colored("   • Admin Interface: http://localhost:80/admin", Colors.OKGREEN)
         print_colored("   • Health Check:    http://localhost:80/health", Colors.OKGREEN)
         print_colored("   • API Docs:        http://localhost:80/docs", Colors.OKGREEN)
         print_colored("   • WebSocket:       ws://localhost:80/ws/admin-updates", Colors.OKGREEN)
         
     except subprocess.CalledProcessError:
-        print_error("Erro ao obter status")
+        print_error("Error getting status")
 
-def show_logs(follow: bool = False) -> None:
-    """Mostra logs da aplicação."""
-    print_step("Logs da aplicação:")
+def show_logs(follow: bool = False, use_sudo: bool = False) -> None:
+    """Shows application logs."""
+    print_step("Application logs:")
     
     try:
         cmd = ["docker", "compose", "logs"]
@@ -487,19 +486,89 @@ def show_logs(follow: bool = False) -> None:
             cmd.append("-f")
         cmd.append(COMPOSE_SERVICE)
         
-        run_command(cmd, capture_output=False)
+        run_command(cmd, capture_output=False, use_sudo=use_sudo)
             
     except subprocess.CalledProcessError:
-        print_error("Erro ao obter logs")
+        print_error("Error getting logs")
+
+def setup_maximum_permissions() -> bool:
+    """Sets up maximum permissions for all necessary files."""
+    print_step("Setting up maximum permissions...")
+    
+    try:
+        # Set permissions for configuration files
+        config_files = [
+            'finviz_config.json',
+            'webhook_config.json', 
+            'system_config.json'
+        ]
+        
+        for config_file in config_files:
+            if not os.path.exists(config_file):
+                # Criar arquivo se não existir
+                with open(config_file, 'w') as f:
+                    f.write('{}')
+                print(f"📁 Criado arquivo: {config_file}")
+            
+            # No Linux/Mac, usar chmod para definir permissões máximas
+            if os.name != 'nt':
+                run_command(['chmod', '666', config_file], use_sudo=True, check=False)
+            else:
+                # No Windows, definir como não somente leitura
+                os.chmod(config_file, 0o666)
+        
+        # Criar diretórios necessários com permissões máximas
+        directories = ['logs', 'data', 'database/__pycache__']
+        for directory in directories:
+            os.makedirs(directory, exist_ok=True)
+            if os.name != 'nt':
+                run_command(['chmod', '777', directory], use_sudo=True, check=False)
+            else:
+                os.chmod(directory, 0o777)
+            print(f"📁 Diretório criado/configurado: {directory}")
+        
+        # Definir permissões para arquivos Python
+        python_files = [f for f in os.listdir('.') if f.endswith(('.py', '.json', '.txt'))]
+        for py_file in python_files:
+            if os.name != 'nt':
+                run_command(['chmod', '666', py_file], use_sudo=True, check=False)
+            else:
+                os.chmod(py_file, 0o666)
+        
+        print_success("Permissões máximas configuradas com sucesso!")
+        return True
+        
+    except Exception as e:
+        print_warning(f"Aviso: Não foi possível definir algumas permissões: {e}")
+        print_warning("Continuando com as permissões atuais...")
+        return True  # Continuar mesmo com erro de permissões
+
+def run_with_maximum_privileges() -> bool:
+    """Executa aplicação com privilégios máximos se necessário."""
+    print_step("Verificando necessidade de privilégios elevados...")
+    
+    # Verificar se precisa de sudo para Docker
+    try:
+        run_command(["docker", "info"], capture_output=True)
+        print_success("Docker acessível sem sudo")
+        use_sudo_docker = False
+    except subprocess.CalledProcessError:
+        print_warning("Docker requires sudo for execution")
+        use_sudo_docker = True
+    
+    # Configurar permissões máximas antes de iniciar
+    setup_maximum_permissions()
+    
+    return use_sudo_docker
 
 def main():
-    """Função principal."""
-    parser = argparse.ArgumentParser(description="Script para executar Trading Signal Processor")
-    parser.add_argument("--logs", action="store_true", help="Mostra logs após iniciar")
-    parser.add_argument("--follow-logs", action="store_true", help="Acompanha logs em tempo real")
-    parser.add_argument("--status-only", action="store_true", help="Apenas mostra status, sem reiniciar")
-    parser.add_argument("--stop", action="store_true", help="Para a aplicação")
-    parser.add_argument("--quick", action="store_true", help="Build rápido (usa cache Docker)")
+    """Main function."""
+    parser = argparse.ArgumentParser(description="Script to run Trading Signal Processor")
+    parser.add_argument("--logs", action="store_true", help="Show logs after starting")
+    parser.add_argument("--follow-logs", action="store_true", help="Follow logs in real time")
+    parser.add_argument("--status-only", action="store_true", help="Only show status, without restarting")
+    parser.add_argument("--stop", action="store_true", help="Stop the application")
+    parser.add_argument("--quick", action="store_true", help="Quick build (uses Docker cache)")
     
     args = parser.parse_args()
     
@@ -509,22 +578,25 @@ def main():
 ║                      Deploy Script                           ║
 ╚══════════════════════════════════════════════════════════════╝
 """, Colors.HEADER)
-      # Verifica se deve apenas parar
+      # Check if should only stop
     if args.stop:
-        print_step("Parando aplicação...")
+        print_step("Stopping application...")
         try:
             run_command(["docker", "compose", "down"])
-            print_success("Aplicação parada com sucesso")
+            print_success("Application stopped successfully")
         except subprocess.CalledProcessError:
-            print_error("Erro ao parar aplicação")
+            print_error("Error stopping application")
         return
     
-    # Verifica se deve apenas mostrar status
+    # Check if should only show status
     if args.status_only:
         show_status()
         return
     
-    # Verificações iniciais
+    # Initial checks
+    print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
+    use_sudo = run_with_maximum_privileges()
+    
     if not check_docker():
         sys.exit(1)
     
@@ -533,55 +605,59 @@ def main():
     
     if not check_required_files():
         sys.exit(1)
-      # Cria .env se necessário
+      # Create .env if necessary
     create_env_file_if_missing()
       # Cria diretórios necessários
     create_required_directories()
     
-    # Verifica configuração do banco de dados
+    # Check database configuration
     if not check_database_configuration():
         sys.exit(1)
     
     # Para containers existentes
-    stop_existing_containers()
-    cleanup_orphaned_containers()
+    stop_existing_containers(use_sudo)
+    cleanup_orphaned_containers(use_sudo)
     
     # Faz build e inicia
     if args.quick:
-        if not build_and_start_fast():
+        if not build_and_start_fast(use_sudo):
             sys.exit(1)
     else:
-        if not build_and_start():
+        if not build_and_start(use_sudo):
             sys.exit(1)
     
-    # Aguarda banco de dados ficar disponível
+    # Wait for database to become available
     if not wait_for_database():
-        print_warning("⚠️  Banco de dados pode não estar funcionando. A aplicação tentará se conectar automaticamente.")
+        print_warning("⚠️  Database may not be working. Application will try to connect automatically.")
     
-    # Inicializa banco de dados
+    # Initialize database
     if not initialize_database():
-        print_warning("⚠️  Inicialização do banco pode ter falhado. Verifique os logs da aplicação.")
+        print_warning("⚠️  Database initialization may have failed. Check application logs.")
     
-    # Aguarda health check da aplicação
+    # Wait for application health check
     if not wait_for_health_check():
-        print_warning("Aplicação pode não estar funcionando corretamente")
-        print_colored("Verifique os logs com: python run.py --logs", Colors.WARNING)
+        print_warning("Application may not be working correctly")
+        print_colored("Check logs with: python run.py --logs", Colors.WARNING)
     
-    # Mostra status
+    # Show status
     show_status()
-      # Mostra logs se solicitado
+      # Show logs if requested
     if args.logs or args.follow_logs:
-        show_logs(follow=args.follow_logs)
+        show_logs(follow=args.follow_logs, use_sudo=use_sudo)
     
     print_colored(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║  🎉 Aplicação está rodando na porta 80!                      ║
+║  🎉 Application is running on port 80!                      ║
+║  🔧 Running with MAXIMUM PRIVILEGES (ROOT)                  ║
 ║                                                              ║
-║  Para atualização rápida: python run.py --quick             ║
-║  Para ver logs:           python run.py --logs              ║
-║  Para acompanhar logs:    python run.py --follow-logs       ║
-║  Para ver status:         python run.py --status-only       ║
-║  Para parar:              python run.py --stop              ║
+║  For quick update:        python run.py --quick             ║
+║  To view logs:            python run.py --logs              ║
+║  To follow logs:          python run.py --follow-logs       ║
+║  To view status:          python run.py --status-only       ║
+║  To stop:                 python run.py --stop              ║
+║                                                              ║
+║  ⚠️  WARNING: Container running as ROOT to resolve          ║
+║      file permission issues                                 ║
 ╚══════════════════════════════════════════════════════════════╝
 """, Colors.OKGREEN)
 
@@ -589,8 +665,8 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print_colored("\n\n🛑 Operação cancelada pelo usuário", Colors.WARNING)
+        print_colored("\n\n🛑 Operation cancelled by user", Colors.WARNING)
         sys.exit(1)
     except Exception as e:
-        print_error(f"Erro inesperado: {e}")
+        print_error(f"Unexpected error: {e}")
         sys.exit(1)

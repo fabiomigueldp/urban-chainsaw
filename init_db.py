@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script para inicializar o banco de dados do Trading Signal Processor.
-Abordagem SIMPLES: Apaga e recria tudo do zero.
+Script to initialize the Trading Signal Processor database.
+SIMPLE approach: Deletes and recreates everything from scratch.
 """
 
 import asyncio
@@ -16,19 +16,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def recreate_database():
-    """Apaga e recria o banco de dados do zero."""
-    print("🗑️  RECRIANDO BANCO DE DADOS DO ZERO")
+    """Deletes and recreates the database from scratch."""
+    print("🗑️  RECREATING DATABASE FROM SCRATCH")
     print("=" * 50)
     
-    # Extrair informações da URL do banco
+    # Extract information from database URL
     db_url = str(settings.DATABASE_URL)
     
-    # URL para conectar ao servidor PostgreSQL (sem especificar o banco)
+    # URL to connect to PostgreSQL server (without specifying the database)
     server_url = db_url.replace("/trading_signals", "/postgres")
     
     print(f"📡 Conectando ao servidor: {server_url}")
     
-    # Criar engine para conectar ao servidor
+    # Create engine to connect to server
     engine = create_async_engine(server_url)
     
     try:
@@ -41,41 +41,41 @@ async def recreate_database():
                 WHERE datname = 'trading_signals' AND pid <> pg_backend_pid()
             """))
             
-            # 2. Dropar banco se existir
-            print("🗑️  Apagando banco 'trading_signals'...")
+            # 2. Drop database if it exists
+            print("🗑️  Dropping database 'trading_signals'...")
             await conn.execute(text("DROP DATABASE IF EXISTS trading_signals"))
             
-            # 3. Criar banco novo
-            print("🏗️  Criando banco 'trading_signals'...")
+            # 3. Create new database
+            print("🏗️  Creating database 'trading_signals'...")
             await conn.execute(text("CREATE DATABASE trading_signals"))
             
-        print("✅ Banco recriado com sucesso!")
+        print("✅ Database recreated successfully!")
         
     except Exception as e:
-        print(f"❌ Erro ao recriar banco: {e}")
+        print(f"❌ Error recreating database: {e}")
         raise
     finally:
         await engine.dispose()
 
 async def create_tables():
-    """Cria todas as tabelas no banco novo."""
-    print("\n🏗️  CRIANDO TABELAS")
+    """Creates all tables in the new database."""
+    print("\n🏗️  CREATING TABLES")
     print("=" * 30)
     
-    # Conectar ao banco novo
+    # Connect to the new database
     engine = create_async_engine(str(settings.DATABASE_URL))
     
     try:
         async with engine.begin() as conn:
-            # Criar todas as tabelas definidas nos modelos
+            # Create all tables defined in the models
             await conn.run_sync(Base.metadata.create_all)
             
-        print("✅ Tabelas criadas:")
+        print("✅ Tables created:")
         print("   📊 signals")
         print("   📝 signal_events")
         
     except Exception as e:
-        print(f"❌ Erro ao criar tabelas: {e}")
+        print(f"❌ Error creating tables: {e}")
         raise
     finally:
         await engine.dispose()
@@ -89,7 +89,7 @@ async def verify_schema():
     
     try:
         async with engine.begin() as conn:
-            # Verificar tabelas
+            # Check tables
             result = await conn.execute(text("""
                 SELECT table_name 
                 FROM information_schema.tables 
@@ -98,11 +98,11 @@ async def verify_schema():
             """))
             tables = [row[0] for row in result]
             
-            print("📊 Tabelas encontradas:")
+            print("📊 Tables found:")
             for table in tables:
                 print(f"   ✅ {table}")
             
-            # Verificar colunas da tabela signals
+            # Check columns of the signals table
             result = await conn.execute(text("""
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns 
@@ -110,13 +110,13 @@ async def verify_schema():
                 ORDER BY ordinal_position
             """))
             
-            print(f"\n📋 Colunas da tabela 'signals':")
+            print(f"\n📋 Columns of table 'signals':")
             for row in result:
                 nullable = "NULL" if row[2] == "YES" else "NOT NULL"
                 print(f"   📝 {row[0]} ({row[1]}) {nullable}")
                 
     except Exception as e:
-        print(f"❌ Erro ao verificar schema: {e}")
+        print(f"❌ Error checking schema: {e}")
         raise
     finally:
         await engine.dispose()
@@ -181,9 +181,9 @@ async def test_basic_operations():
         await db_manager.close()
 
 async def main():
-    """Executa a inicialização completa do banco."""
-    print("🚀 INICIALIZAÇÃO DO BANCO DE DADOS")
-    print("🔄 Abordagem: RECRIAR DO ZERO (mais simples que migrações)")
+    """Executes complete database initialization."""
+    print("🚀 DATABASE INITIALIZATION")
+    print("🔄 Approach: RECREATE FROM SCRATCH (simpler than migrations)")
     print("=" * 60)
     
     try:

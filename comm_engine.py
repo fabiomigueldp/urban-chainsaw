@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Union
 from dataclasses import dataclass
 from datetime import datetime
 
-# Configuração básica de logging para podermos ver as mensagens
+# Basic logging configuration so we can see the messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 _logger = logging.getLogger(__name__)
 

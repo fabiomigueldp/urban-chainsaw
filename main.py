@@ -123,6 +123,7 @@ def get_current_metrics() -> Dict[str, Any]:
                 "metrics_start_time": memory_metrics["metrics_start_time"],
                 "approved_queue_size": approved_queue_size,
                 "processing_queue_size": processing_queue_size,
+                "processing_workers_active": memory_metrics["processing_workers_active"],
                 "forwarding_workers_active": memory_metrics["forwarding_workers_active"],
                 "data_source": "hybrid_memory_db"
             }
@@ -189,6 +190,7 @@ signal_metrics = {
     "metrics_start_time": None,
     "approved_queue_size": 0,
     "processing_queue_size": 0,
+    "processing_workers_active": 0,
     "forwarding_workers_active": 0
 }
 
@@ -252,14 +254,19 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
     _logger.info(f"Queue worker {worker_id} started")
     
     while True:
-        try:            # Get signal from queue
+        try:
+            # Get signal from queue
             signal = await queue.get()
             signal_id = signal.signal_id
+            
+            # Increment active processing workers counter
+            shared_state["signal_metrics"]["processing_workers_active"] += 1
             
             _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Processing signal for ticker: {signal.normalised_ticker()}")
             
             # Log processing event to database
-            try:                await db_manager.log_signal_event(
+            try:
+                await db_manager.log_signal_event(
                     signal_id=signal_id,
                     event_type=SignalStatusEnum.PROCESSING,
                     details="Signal being processed by worker",
@@ -361,6 +368,12 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
                 except Exception as db_error:
                     _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log error to database: {db_error}")
             finally:
+                # Decrement active processing workers counter
+                shared_state["signal_metrics"]["processing_workers_active"] -= 1
+                
+                # Broadcast updated metrics
+                await comm_engine.broadcast("metrics_update", get_current_metrics())
+                
                 # Processing completed - cleanup happens through database
                 pass
                 
@@ -737,7 +750,9 @@ async def get_queue_status_data() -> Dict[str, Any]:
         queue_status = {
             "processing_queue_size": queue.qsize() if queue else 0,
             "approved_queue_size": approved_signal_queue.qsize() if approved_signal_queue else 0,
-            "active_workers": 0,  # TODO: Implement actual worker count
+            "processing_workers_active": shared_state["signal_metrics"]["processing_workers_active"],
+            "forwarding_workers_active": shared_state["signal_metrics"]["forwarding_workers_active"],
+            "active_workers": shared_state["signal_metrics"]["processing_workers_active"] + shared_state["signal_metrics"]["forwarding_workers_active"],  # Total active workers
         }
         
         return queue_status
@@ -1041,6 +1056,7 @@ async def detailed_health_check():
             "workers": {
                 "processing": settings.WORKER_CONCURRENCY,
                 "forwarding": settings.FORWARDING_WORKERS,
+                "processing_active": shared_state["signal_metrics"]["processing_workers_active"],
                 "forwarding_active": shared_state["signal_metrics"]["forwarding_workers_active"]
             },
             "top_n_tickers": {
@@ -1206,7 +1222,8 @@ async def reset_signal_metrics(payload: dict = Body(...)):
     shared_state["signal_metrics"]["signals_rejected"] = 0
     shared_state["signal_metrics"]["signals_forwarded_success"] = 0
     shared_state["signal_metrics"]["signals_forwarded_error"] = 0
-    shared_state["signal_metrics"]["forwarding_workers_active"] = 0  # Reset active workers counter
+    shared_state["signal_metrics"]["processing_workers_active"] = 0  # Reset active processing workers counter
+    shared_state["signal_metrics"]["forwarding_workers_active"] = 0  # Reset active forwarding workers counter
     shared_state["signal_metrics"]["metrics_start_time"] = time.time()
     
     # CRITICAL FIX: Invalidate database cache to force using memory metrics after reset
@@ -1577,7 +1594,7 @@ async def sell_all_orders(payload: TokenPayload):
         _logger.error(f"Error in sell-all operation: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing sell-all: {str(e)}")
 
-# Substitui a implementação existente do signals-history para fornecer dados reais
+# Replaces existing signals-history implementation to provide real data
 @app.get("/admin/signals-history")
 async def get_signals_history(hours: int = 24):
     """Get signal history and trends directly from database with formatted data for charts."""
@@ -1667,9 +1684,9 @@ async def get_admin_audit_trail(
     signal_id: str = None,
     signal_type: str = None  # NEW: Signal type filter
 ):
-    """Retorna eventos de auditoria para o painel admin com filtros melhorados."""
+    """Returns audit events for admin panel with improved filters."""
     try:
-        # Monta filtros para o DBManager
+        # Set up filters for the DBManager
         filters = {}
         if status_filter:
             filters['status_filter'] = status_filter
@@ -1754,7 +1771,7 @@ async def get_admin_audit_trail(
             "filters_applied": filters
         }
     except Exception as e:
-        _logger.error(f"Erro ao buscar audit trail: {e}", exc_info=True)
+        _logger.error(f"Error fetching audit trail: {e}", exc_info=True)
         return {
             "events": [], 
             "total": 0, 
@@ -2002,7 +2019,7 @@ async def get_admin_status():
 
 @app.get("/admin/top-n-tickers")
 async def get_top_n_tickers():
-    """Retorna a lista atual de tickers do Top-N aprovados pelo FinvizEngine."""
+    """Returns the current list of Top-N tickers approved by FinvizEngine."""
     try:
         current_tickers = await get_tickers_from_shared_state()
         engine = shared_state.get("finviz_engine_instance")

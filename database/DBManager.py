@@ -3,10 +3,10 @@
 # ==========================================================================================
 #                         Trading Signal Processor - DBManager
 #
-# ABORDAGEM HÍBRIDA IMPLEMENTADA:
-# - Enums no Python para type safety e clareza
-# - Strings no banco para simplicidade e performance
-# - Conversão automática na camada de persistência
+# HYBRID APPROACH IMPLEMENTED:
+# - Enums in Python for type safety and clarity
+# - Strings in database for simplicity and performance
+# - Automatic conversion in persistence layer
 # ==========================================================================================
 
 import logging
@@ -19,7 +19,7 @@ from sqlalchemy import select, func, and_, or_, desc, asc, text, String
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-# Importações do seu projeto
+# Project imports
 from config import settings
 from models import Signal as SignalPayload, SignalTracker, AuditTrailQuery, AuditTrailResponse
 from database.simple_models import Base, Signal, SignalEvent, SignalStatusEnum, SignalLocationEnum, MetricPeriodEnum, SignalTypeEnum
@@ -27,7 +27,7 @@ from database.simple_models import Base, Signal, SignalEvent, SignalStatusEnum, 
 _logger = logging.getLogger("DBManager")
 
 class DBManager:
-    """Gerenciador centralizado para todas as operações de banco de dados."""
+    """Centralized manager for all database operations."""
 
     def __init__(self):
         self.engine = None
@@ -35,9 +35,9 @@ class DBManager:
         self._initialized = False
 
     def initialize(self, database_url: str):
-        """Inicializa o motor do banco de dados e a fábrica de sessões. Deve ser chamado no startup da aplicação."""
+        """Initializes the database engine and session factory. Must be called at application startup."""
         if self._initialized:
-            _logger.warning("DatabaseManager já foi inicializado.")
+            _logger.warning("DatabaseManager already initialized.")
             return
 
         engine_config = {
@@ -56,19 +56,19 @@ class DBManager:
         )
 
         self._initialized = True
-        _logger.info(f"DatabaseManager inicializado com sucesso. Pool size: {engine_config['pool_size']}")
+        _logger.info(f"DatabaseManager initialized successfully. Pool size: {engine_config['pool_size']}")
 
     async def close(self):
-        """Fecha as conexões do banco de dados. Deve ser chamado no shutdown da aplicação."""
+        """Closes database connections. Must be called at application shutdown."""
         if self.engine:
             await self.engine.dispose()
-            _logger.info("Conexões do banco de dados fechadas.")
+            _logger.info("Database connections closed.")
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """Providencia uma sessão de banco de dados com gerenciamento de transação."""
+        """Provides a database session with transaction management."""
         if not self._initialized:
-            raise RuntimeError("DatabaseManager não foi inicializado. Chame initialize() primeiro.")
+            raise RuntimeError("DatabaseManager not initialized. Call initialize() first.")
 
         session: AsyncSession = self.async_session_factory()
         try:
@@ -76,18 +76,18 @@ class DBManager:
             await session.commit()
         except Exception as e:
             await session.rollback()
-            _logger.error(f"Erro na sessão do banco de dados, transação revertida: {e}", exc_info=True)
+            _logger.error(f"Database session error, transaction rolled back: {e}", exc_info=True)
             raise
         finally:
             await session.close()
 
-    # --- Métodos de Lógica de Negócio (API Pública do Manager) ---
+    # --- Business Logic Methods (Manager Public API) ---
     
     async def create_signal_with_initial_event(self, signal_payload: SignalPayload, signal_type: SignalTypeEnum = SignalTypeEnum.BUY) -> str:
         """
-        Cria um novo registro de sinal e seu primeiro evento 'RECEIVED'.
-        Esta é a principal função a ser chamada quando um novo sinal chega.
-        HÍBRIDO: Usa enums no código, salva strings no banco.
+        Creates a new signal record and its first 'RECEIVED' event.
+        This is the main function to be called when a new signal arrives.
+        HYBRID: Uses enums in code, saves strings to database.
         """
         async with self.get_session() as session:
             db_signal = Signal(
@@ -103,20 +103,20 @@ class DBManager:
 
             initial_event = SignalEvent(
                 signal_id=db_signal.signal_id,
-                status=SignalStatusEnum.RECEIVED.value,  # Enum -> string para DB
-                details="Sinal recebido e enfileirado para processamento."
+                status=SignalStatusEnum.RECEIVED.value,  # Enum -> string for DB
+                details="Signal received and queued for processing."
             )
 
             session.add(db_signal)
             session.add(initial_event)
             await session.flush()
-            _logger.debug(f"Sinal {db_signal.signal_id} criado no banco de dados.")
+            _logger.debug(f"Signal {db_signal.signal_id} created in database.")
             return str(db_signal.signal_id)
 
     async def log_signal_event(
         self,
         signal_id: str,
-        event_type: SignalStatusEnum,  # Aceita enum no código
+        event_type: SignalStatusEnum,  # Accepts enum in code
         location: Optional[SignalLocationEnum] = None,
         details: Optional[str] = None,
         worker_id: Optional[str] = None,
@@ -125,45 +125,45 @@ class DBManager:
         response_data: Optional[str] = None
     ) -> bool:
         """
-        Registra um novo evento para um sinal existente e atualiza o estado atual do sinal.
-        HÍBRIDO: Aceita enums no Python, converte para string no banco.
+        Logs a new event for an existing signal and updates the current signal state.
+        HYBRID: Accepts enums in Python, converts to string in database.
         """
         async with self.get_session() as session:
-            # Encontra o sinal principal
+            # Find the main signal
             result = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
             db_signal = result.scalar_one_or_none()
 
             if not db_signal:
-                _logger.warning(f"Tentativa de logar evento para sinal inexistente: {signal_id}")
+                _logger.warning(f"Attempt to log event for non-existent signal: {signal_id}")
                 return False
 
-            # Cria o novo evento - converte enum para string
+            # Create new event - convert enum to string
             event_type_str = event_type.value if hasattr(event_type, 'value') else str(event_type)
             
             new_event = SignalEvent(
                 signal_id=signal_id,
-                status=event_type_str,  # String no banco
+                status=event_type_str,  # String in database
                 details=details,
                 worker_id=worker_id
             )
             session.add(new_event)
 
-            # Atualiza o estado atual do sinal principal
-            db_signal.status = event_type_str  # String no banco
+            # Update current state of main signal
+            db_signal.status = event_type_str  # String in database
             
             await session.flush()
-            _logger.debug(f"Evento '{event_type_str}' logado para o sinal {signal_id}.")
+            _logger.debug(f"Event '{event_type_str}' logged for signal {signal_id}.")
             return True
 
     async def increment_signal_retry_count(self, signal_id: str) -> Optional[int]:
-        """Incrementa a contagem de retentativas para um sinal."""
+        """Increments the retry count for a signal."""
         async with self.get_session() as session:
             result = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
             db_signal = result.scalar_one_or_none()
             if db_signal:
-                # Adicionar campo retry_count se não existir no modelo
+                # Add retry_count field if it doesn't exist in the model
                 if not hasattr(db_signal, 'retry_count'):
-                    _logger.warning("Campo retry_count não existe no modelo Signal. Implementação futura.")
+                    _logger.warning("retry_count field does not exist in Signal model. Future implementation.")
                     return None
                 db_signal.retry_count = (db_signal.retry_count or 0) + 1
                 await session.flush()
@@ -171,7 +171,7 @@ class DBManager:
             return None
             
     async def get_signal_retry_count(self, signal_id: str) -> int:
-        """Obtém a contagem atual de retentativas para um sinal."""
+        """Gets the current retry count for a signal."""
         async with self.get_session() as session:
             result = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
             db_signal = result.scalar_one_or_none()
@@ -180,9 +180,9 @@ class DBManager:
             return 0
 
     async def get_system_analytics(self) -> Dict[str, Any]:
-        """Obtém métricas e análises gerais do sistema."""
+        """Gets general system metrics and analytics."""
         async with self.get_session() as session:
-            # Contagem total de sinais
+            # Total signal count
             total_signals_res = await session.execute(select(func.count(Signal.signal_id)))
             total_signals = total_signals_res.scalar_one()
             
@@ -196,12 +196,12 @@ class DBManager:
                     "status_distribution": {}
                 }
                   
-            # Distribuição de status (agora strings no banco)
+            # Status distribution (now strings in database)
             status_query = select(Signal.status, func.count(Signal.signal_id)).group_by(Signal.status)
             status_res = await session.execute(status_query)
             status_distribution = {status: count for status, count in status_res}
 
-            # Outras métricas
+            # Other metrics
             avg_duration_res = await session.execute(
                 select(func.avg(Signal.processing_time_ms)).where(Signal.processing_time_ms.isnot(None))
             )
@@ -219,18 +219,18 @@ class DBManager:
 
     async def get_hourly_signal_stats(self, hours: int = 24) -> List[Dict[str, Any]]:
         """
-        Obtém estatísticas de sinal por hora para as últimas N horas.
-        Retorna os dados formatados para gráficos, sempre preenchendo horas faltantes com zeros.
+        Gets signal statistics by hour for the last N hours.
+        Returns data formatted for charts, always filling missing hours with zeros.
         """
         try:
             async with self.get_session() as session:
-                # Calcular intervalo de tempo - usar timezone-aware datetime
+                # Calculate time interval - use timezone-aware datetime
                 end_time = datetime.utcnow()
                 start_time = end_time - timedelta(hours=hours)
                 
                 _logger.info(f"Getting hourly stats from {start_time} to {end_time} ({hours} hours)")
                 
-                # Consulta para obter dados agregados por hora
+                # Query to get data aggregated by hour
                 query = text("""
                     SELECT 
                         DATE_TRUNC('hour', created_at) as hour,
@@ -249,10 +249,10 @@ class DBManager:
                     'end_time': end_time
                 })
                 
-                # Mapear dados do banco por hora
+                # Map database data by hour
                 data_by_hour = {}
                 for row in result:
-                    # Garantir que a hora seja timezone-aware
+                    # Ensure hour is timezone-aware
                     hour_key = row.hour.replace(tzinfo=None) if row.hour.tzinfo else row.hour
                     data_by_hour[hour_key] = row
                 
@@ -260,7 +260,7 @@ class DBManager:
                 
                 hourly_data = []
                 
-                # Preencher TODAS as horas no intervalo, mesmo que não tenham dados
+                # Fill ALL hours in the interval, even if they have no data
                 for i in range(hours):
                     hour_time = end_time - timedelta(hours=hours-1-i)
                     hour_key = hour_time.replace(minute=0, second=0, microsecond=0)
@@ -282,7 +282,7 @@ class DBManager:
                             "signals_forwarded": row.forwarded_signals  # Alias for frontend compatibility
                         })
                     else:
-                        # Preencher hora sem dados com zeros
+                        # Fill hour without data with zeros
                         hourly_data.append({
                             "hour": hour_time.strftime("%H:00"),
                             "hour_label": hour_time.strftime("%H:00"),
@@ -302,9 +302,9 @@ class DBManager:
                 return hourly_data
                 
         except Exception as e:
-            _logger.error(f"Erro ao obter estatísticas horárias de sinais: {e}", exc_info=True)
+            _logger.error(f"Error getting hourly signal statistics: {e}", exc_info=True)
             
-            # Retornar dados de fallback em caso de erro
+            # Return fallback data in case of error
             hourly_data = []
             end_time = datetime.utcnow()
             for i in range(hours):
@@ -328,7 +328,7 @@ class DBManager:
             return hourly_data
 
     async def query_signals(self, query_params: AuditTrailQuery) -> AuditTrailResponse:
-        """Consulta avançada de sinais com filtros, paginação e ordenação."""
+        """Advanced signal query with filters, pagination and sorting."""
         async with self.get_session() as session:
             base_query = select(Signal)
             count_query = select(func.count(Signal.signal_id))
@@ -339,10 +339,10 @@ class DBManager:
                 base_query = base_query.where(filter_condition)
                 count_query = count_query.where(filter_condition)
 
-            # Total de registros
+            # Total records
             total_count = (await session.execute(count_query)).scalar_one()
 
-            # Ordenação
+            # Sorting
             sort_column_map = {
                 "created_at": Signal.created_at,
                 "updated_at": Signal.updated_at,
@@ -354,14 +354,14 @@ class DBManager:
             else:
                 base_query = base_query.order_by(asc(sort_column))
 
-            # Paginação
+            # Pagination
             offset = (query_params.page - 1) * query_params.page_size
             base_query = base_query.offset(offset).limit(query_params.page_size)
 
             if query_params.include_events:
                 base_query = base_query.options(selectinload(Signal.events))
 
-            # Execução
+            # Execution
             result = await session.execute(base_query)
             signals = result.scalars().all()
             
@@ -379,25 +379,25 @@ class DBManager:
             )
 
     async def run_data_cleanup(self, retention_days: int) -> Dict[str, Any]:
-        """Remove dados de sinais e eventos mais antigos que o período de retenção."""
+        """Removes signal and event data older than the retention period."""
         async with self.get_session() as session:
             cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
             
-            # Usar text() para performance em deletes em massa
-            # O cascade delete no relacionamento cuidará dos eventos.
+            # Use text() for performance in bulk deletes
+            # Cascade delete in relationship will handle events.
             delete_stmt = text("DELETE FROM signals WHERE created_at < :cutoff")
             
             result = await session.execute(delete_stmt, {"cutoff": cutoff_date})
             deleted_count = result.rowcount
 
-            _logger.info(f"Limpeza de dados concluída. {deleted_count} sinais antigos removidos.")
+            _logger.info(f"Data cleanup completed. {deleted_count} old signals removed.")
             return {
                 "deleted_signals_count": deleted_count,
                 "retention_period_days": retention_days,
                 "cutoff_date": cutoff_date.isoformat()
             }
 
-    # --- Métodos de Compatibilidade (Legacy API) ---
+    # --- Compatibility Methods (Legacy API) ---
     
     async def get_audit_trail(
         self,
@@ -412,14 +412,14 @@ class DBManager:
         hours: Optional[int] = None,
         **kwargs  # Accept additional parameters for backward compatibility
     ) -> List[Dict[str, Any]]:
-        """Método de compatibilidade para get_audit_trail (legacy API) com filtros melhorados."""
+        """Compatibility method for get_audit_trail (legacy API) with improved filters."""
         from models import AuditTrailQuery
         
         # Apply hours filter if provided
         if hours and not start_time:
             start_time = datetime.utcnow() - timedelta(hours=hours)
         
-        # Mapear parâmetros legacy para nova API
+        # Map legacy parameters to new API
         query_params = AuditTrailQuery(
             page=offset // limit + 1,
             page_size=limit,
@@ -450,7 +450,7 @@ class DBManager:
         hours: Optional[int] = None,
         **kwargs  # Accept additional parameters for backward compatibility
     ) -> int:
-        """Conta os registros de auditoria com base nos filtros melhorados."""
+        """Counts audit records based on improved filters."""
         async with self.get_session() as session:
             # Base query - always use count on Signal table
             query = select(func.count(Signal.signal_id))
@@ -480,7 +480,7 @@ class DBManager:
             return result.scalar_one()
 
     async def get_signal_status_distribution(self) -> Dict[str, Any]:
-        """Retorna a distribuição de status dos sinais com metadados."""
+        """Returns signal status distribution with metadata."""
         async with self.get_session() as session:
             query = select(Signal.status, func.count()).group_by(Signal.status)
             result = await session.execute(query)
@@ -494,7 +494,7 @@ class DBManager:
             }
 
     async def get_recent_signals(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Retorna os sinais mais recentes."""
+        """Returns the most recent signals."""
         async with self.get_session() as session:
             query = select(Signal).order_by(desc(Signal.created_at)).limit(limit)
             result = await session.execute(query)
@@ -519,7 +519,7 @@ class DBManager:
             ]
 
     async def get_ticker_performance(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Retorna estatísticas de performance por ticker."""
+        """Returns performance statistics by ticker."""
         async with self.get_session() as session:
             query = select(
                 Signal.ticker,
@@ -543,13 +543,13 @@ class DBManager:
             ]
 
     async def get_live_metrics(self) -> Dict[str, Any]:
-        """Retorna métricas em tempo real do sistema."""
+        """Returns real-time system metrics."""
         async with self.get_session() as session:
-            # Estatísticas gerais
+            # General statistics
             total_signals = await session.execute(select(func.count(Signal.signal_id)))
             total_signals = total_signals.scalar_one()
             
-            # Últimas 24 horas
+            # Last 24 hours
             last_24h = datetime.now() - timedelta(hours=24)
             recent_signals = await session.execute(
                 select(func.count(Signal.signal_id)).where(Signal.created_at >= last_24h)
@@ -559,7 +559,7 @@ class DBManager:
             # Status distribution
             status_dist = await self.get_signal_status_distribution()
             
-            # Últimos eventos
+            # Recent events
             recent_events_query = select(SignalEvent).order_by(desc(SignalEvent.timestamp)).limit(10)
             recent_events_result = await session.execute(recent_events_query)
             recent_events = recent_events_result.scalars().all()
@@ -582,10 +582,10 @@ class DBManager:
                 "timestamp": datetime.now().isoformat()
             }
 
-    # --- Métodos Auxiliares Internos ---
+    # --- Internal Helper Methods ---
 
     def _build_filters(self, p: AuditTrailQuery) -> list:
-        """Constrói a lista de filtros SQLAlchemy a partir dos parâmetros de consulta."""
+        """Builds the SQLAlchemy filter list from query parameters."""
         filters = []
         if p.ticker:
             # Only filter by ticker and normalised_ticker, NOT by signal_id to avoid UUID conversion errors
@@ -597,7 +597,7 @@ class DBManager:
             # Convert UUID to string for ILIKE search
             filters.append(Signal.signal_id.cast(String).ilike(f"%{p.signal_id}%"))
         if p.status and p.status != 'all':
-            # Agora usando strings diretamente
+            # Now using strings directly
             filters.append(Signal.status == p.status)
         if p.signal_type and p.signal_type != 'all':
             # NEW: Filter by signal type
@@ -615,7 +615,7 @@ class DBManager:
         return filters
         
     async def _calculate_query_summary(self, session: AsyncSession, filters: list) -> Dict[str, Any]:
-        """Calcula estatísticas de resumo para um conjunto de filtros."""
+        """Calculates summary statistics for a set of filters."""
         summary_query = select(
             func.count(Signal.signal_id).label('total'),
             func.avg(Signal.processing_time_ms).label('avg_processing_time')
@@ -632,7 +632,7 @@ class DBManager:
         }
 
     def _signal_to_dict(self, signal: Signal, include_events: bool) -> Dict[str, Any]:
-        """Converte um objeto SQLAlchemy Signal em um dicionário para a API."""
+        """Converts a SQLAlchemy Signal object to a dictionary for the API."""
         from datetime import datetime
         
         def safe_datetime_format(dt):
@@ -721,5 +721,5 @@ class DBManager:
         else:
             return 'COMPLETED' if status in ['completed'] else 'PROCESSING_QUEUE'
 
-# Instância Singleton Global - para ser importada em toda a aplicação
+# Global Singleton Instance - to be imported throughout the application
 db_manager = DBManager()
