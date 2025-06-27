@@ -9,7 +9,7 @@ import io
 from datetime import datetime
 from typing import Any, Dict, List, Set, Optional
 
-from pydantic import BaseModel, validator, HttpUrl
+from pydantic import BaseModel, validator, HttpUrl, Field
 
 from config import (
     settings,
@@ -451,6 +451,13 @@ class FinvizEngine:
                 previously_known_tickers = self.last_known_good_tickers.copy()
                 entered_top_n_tickers = new_tickers - previously_known_tickers
 
+                # Log detailed ticker analysis for debugging
+                _logger.info(f"Ticker analysis - Previous: {len(previously_known_tickers)}, New: {len(new_tickers)}, Entered: {len(entered_top_n_tickers)}")
+                _logger.debug(f"Previously known tickers: {sorted(list(previously_known_tickers))}")
+                _logger.debug(f"New tickers: {sorted(list(new_tickers))}")
+                if entered_top_n_tickers:
+                    _logger.info(f"Newly entered tickers: {sorted(list(entered_top_n_tickers))}")
+
                 self.shared_state["tickers"] = new_tickers
                 self.last_known_good_tickers = new_tickers.copy() # Update last known good
                 # finviz_update_success_total.inc() # If using Prometheus
@@ -473,9 +480,12 @@ class FinvizEngine:
                 await self._broadcast_status_update()
 
                 # --- Reprocessing Logic ---
+                _logger.debug(f"Reprocessing check - Enabled: {current_cfg.reprocess_enabled}, New tickers: {len(entered_top_n_tickers)}")
                 if current_cfg.reprocess_enabled and entered_top_n_tickers:
                     _logger.info(f"Reprocessing enabled. Tickers newly entered Top-N: {entered_top_n_tickers}")
                     await self._reprocess_signals_for_new_tickers(entered_top_n_tickers, current_cfg.reprocess_window_seconds)
+                elif current_cfg.reprocess_enabled:
+                    _logger.debug(f"Reprocessing enabled but no new tickers detected. Window: {current_cfg.reprocess_window_seconds}s")
 
             else:
                 # finviz_update_failure_total.inc() # If using Prometheus

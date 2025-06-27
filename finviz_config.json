@@ -1,5 +1,7 @@
 {
-    "finviz_url": "https://elite.finviz.com/screener.ashx?v=151&f=cap_mega%2Cexch_nasd&ft=4&o=-changeopen&ar=10",
-    "top_n": 19,
-    "refresh_interval_sec": 15
+    "finviz_url": "https://elite.finviz.com/screener.ashx?v=151&f=cap_mid&ft=4&o=-changeopen&ar=10",
+    "top_n": 100,
+    "refresh_interval_sec": 15,
+    "reprocess_enabled": true,
+    "reprocess_window_seconds": 300
 }
