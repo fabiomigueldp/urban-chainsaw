@@ -209,6 +209,16 @@ class Settings(BaseSettings):
         description="Number of days to retain system metrics."
     )
 
+    # --- Reprocessing settings for FinvizEngine ---
+    FINVIZ_REPROCESS_ENABLED: bool = Field(
+        False,
+        description="Enable reprocessing of recently rejected signals for new Top-N tickers."
+    )
+    FINVIZ_REPROCESS_WINDOW_SECONDS: int = Field(
+        300,
+        description="Time window in seconds to look back for rejected signals to reprocess."
+    )
+
     class Config:
         env_file = ".env"
         case_sensitive = True
