@@ -580,6 +580,7 @@ async def get_system_info_data() -> Dict[str, Any]:
         engine = shared_state.get("finviz_engine_instance")
         webhook_rl = shared_state.get("webhook_rate_limiter_instance")
         
+        # Initialize with default values
         system_info = {
             "finviz_elite_enabled": True,
             "auth_session_valid": False,
@@ -591,6 +592,9 @@ async def get_system_info_data() -> Dict[str, Any]:
             "webhook_rate_limiter_enabled": False,
             "webhook_tokens_available": "N/A",
             "webhook_max_requests_per_minute": "N/A",
+            # Add pause status information
+            "finviz_engine_paused": False,
+            "webhook_rate_limiter_paused": False,
         }
         
         if engine:
@@ -604,6 +608,8 @@ async def get_system_info_data() -> Dict[str, Any]:
                     "rows_per_page": status_metrics.get("rows_per_page", "N/A"),
                     "rate_limit_tokens_available": status_metrics.get("rate_limit_tokens_available", "N/A"),
                     "concurrency_slots_available": status_metrics.get("concurrency_slots_available", "N/A"),
+                    # Include pause status from engine
+                    "finviz_engine_paused": engine.is_paused(),
                 })
             except Exception as e:
                 _logger.error(f"Error getting engine status metrics: {e}")
@@ -615,9 +621,19 @@ async def get_system_info_data() -> Dict[str, Any]:
                     "webhook_rate_limiter_enabled": webhook_metrics.get("rate_limiting_enabled", False),
                     "webhook_tokens_available": webhook_metrics.get("tokens_available", "N/A"),
                     "webhook_max_requests_per_minute": webhook_metrics.get("max_req_per_min", "N/A"),
+                    # Include pause status - rate limiter is paused when rate limiting is disabled
+                    "webhook_rate_limiter_paused": not webhook_metrics.get("rate_limiting_enabled", False),
                 })
             except Exception as e:
                 _logger.error(f"Error getting webhook rate limiter metrics: {e}")
+        
+        # Get reprocess status from finviz config
+        try:
+            finviz_config = load_finviz_config()
+            system_info["reprocess_enabled"] = finviz_config.get("reprocess_enabled", False)
+        except Exception as e:
+            _logger.warning(f"Could not load finviz config for reprocess status: {e}")
+            system_info["reprocess_enabled"] = False
         
         return system_info
         
@@ -1273,6 +1289,14 @@ async def pause_finviz_engine(payload: dict = Body(...)):
     try:
         await engine.pause()
         _logger.info("FinvizEngine paused via admin endpoint.")
+        
+        # Broadcast updated system status to all admin clients
+        system_info = await get_system_info_data()
+        await comm_engine.broadcast("status_update", {
+            "system_info": system_info,
+            "timestamp": time.time()
+        })
+        
     except Exception as e:
         _logger.error(f"Error pausing FinvizEngine: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error pausing engine.")
@@ -1297,6 +1321,14 @@ async def resume_finviz_engine(payload: dict = Body(...)):
     try:
         await engine.resume()
         _logger.info("FinvizEngine resumed via admin endpoint.")
+        
+        # Broadcast updated system status to all admin clients
+        system_info = await get_system_info_data()
+        await comm_engine.broadcast("status_update", {
+            "system_info": system_info,
+            "timestamp": time.time()
+        })
+        
     except Exception as e:
         _logger.error(f"Error resuming FinvizEngine: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error resuming engine.")
@@ -1444,6 +1476,7 @@ async def get_system_info():
     # Get pause status for frontend compatibility
     finviz_engine_paused = False
     webhook_rate_limiter_paused = False
+    reprocess_enabled = False
     
     if engine:
         finviz_engine_paused = engine.is_paused()
@@ -1452,15 +1485,29 @@ async def get_system_info():
         # Check if rate limiting is disabled (paused)
         webhook_rate_limiter_paused = not rate_limiter.rate_limiting_enabled
     
+    # Get reprocess status from finviz config
+    try:
+        finviz_config = load_finviz_config()
+        reprocess_enabled = finviz_config.get("reprocess_enabled", False)
+    except Exception as e:
+        _logger.warning(f"Could not load finviz config for reprocess status: {e}")
+        reprocess_enabled = False
+    
     return {
-        "system": {
+        "system_info": {
             "uptime_seconds": uptime_seconds,
             "worker_concurrency": settings.WORKER_CONCURRENCY,
-            "dest_webhook_url": str(settings.DEST_WEBHOOK_URL)
+            "dest_webhook_url": str(settings.DEST_WEBHOOK_URL),
+            "finviz_engine_paused": finviz_engine_paused,
+            "webhook_rate_limiter_paused": webhook_rate_limiter_paused,
+            "reprocess_enabled": reprocess_enabled,
+            "finviz_ticker_count": len(shared_state.get("tickers", set())),
+            "timestamp": time.time(),
+            "data_source": signal_processing_metrics.get("data_source", "unknown")
         },
+        "metrics": signal_processing_metrics,
         "queue": queue_info,
         "engine": engine_metrics,
-        "signal_processing": signal_processing_metrics,
         "finviz_config": {
             "elite_enabled": settings.FINVIZ_USE_ELITE,
             "max_requests_per_min": get_max_req_per_min(),
@@ -1468,9 +1515,10 @@ async def get_system_info():
             "tickers_per_page": get_finviz_tickers_per_page()
         },
         "webhook_rate_limiter": webhook_rate_limiter_info,
-        # Frontend compatibility fields
+        # Compatibility fields - also keep at root level for backward compatibility
         "finviz_engine_paused": finviz_engine_paused,
         "webhook_rate_limiter_paused": webhook_rate_limiter_paused,
+        "reprocess_enabled": reprocess_enabled,
         "finviz_ticker_count": len(shared_state.get("tickers", set())),
         "timestamp": time.time(),
         "data_source": signal_processing_metrics.get("data_source", "unknown")
@@ -1826,6 +1874,14 @@ async def pause_webhook_rate_limiter(payload: dict = Body(...)):
     try:
         webhook_rl.pause()  # Remove await - method is not async
         _logger.info("Webhook rate limiter paused via admin endpoint")
+        
+        # Broadcast updated system status to all admin clients
+        system_info = await get_system_info_data()
+        await comm_engine.broadcast("status_update", {
+            "system_info": system_info,
+            "timestamp": time.time()
+        })
+        
     except Exception as e:
         _logger.error(f"Error pausing webhook rate limiter: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error pausing rate limiter")
@@ -1844,6 +1900,14 @@ async def resume_webhook_rate_limiter(payload: dict = Body(...)):
     try:
         webhook_rl.resume()  # Remove await - method is not async
         _logger.info("Webhook rate limiter resumed via admin endpoint")
+        
+        # Broadcast updated system status to all admin clients
+        system_info = await get_system_info_data()
+        await comm_engine.broadcast("status_update", {
+            "system_info": system_info,
+            "timestamp": time.time()
+        })
+        
     except Exception as e:
         _logger.error(f"Error resuming webhook rate limiter: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error resuming rate limiter")
@@ -1927,6 +1991,8 @@ async def get_finviz_config():
             "finviz_url": finviz_config.get("finviz_url", ""),
             "top_n": finviz_config.get("top_n", 15),
             "refresh_interval_sec": finviz_config.get("refresh_interval_sec", 10),
+            "reprocess_enabled": finviz_config.get("reprocess_enabled", False),
+            "reprocess_window_seconds": finviz_config.get("reprocess_window_seconds", 300),
             "timestamp": time.time()
         }
     except Exception as e:

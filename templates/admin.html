@@ -327,6 +327,10 @@
                         <hr>
                         <div class="row">
                             <div class="col-6">
+                                <strong>Reprocess Signals:</strong><br>
+                                <span id="reprocessStatus" class="badge badge-status">-</span>
+                            </div>
+                            <div class="col-6">
                                 <strong>Top-N Tickers:</strong><br>
                                 <span id="tickerCount">-</span>
                             </div>
@@ -831,44 +835,59 @@
                 updateConnectionStatus(false);
             };
         }
-          // Handle WebSocket messages
+          // Handle WebSocket messages - UPDATED VERSION 2.0
         function handleWebSocketMessage(data) {
-            switch(data.type) {
-                case 'metrics_update':
-                    updateMetrics(data.data);
-                    break;
-                case 'status_update':
-                    // Handle comprehensive status update
-                    if (data.data.metrics) {
-                        updateMetrics(data.data.metrics);
-                    }
-                    if (data.data.system_info) {
-                        updateSystemStatus(data.data.system_info);
-                    }
-                    // Update charts if included
-                    if (data.data.metrics || data.data.system_info) {
-                        updateChartsWithData(data.data);
-                    }
-                    break;
-                case 'sell_all_list_update':
-                    updateSellAllList(data.data);
-                    break;
-                case 'audit_update':
-                    // Optionally refresh audit trail on new events
-                    if (currentPage === 1) {
-                        loadAuditTrail();
-                    }
-                    break;
-                case 'metrics_reset':
-                    // Handle metrics reset
-                    updateMetrics(data.data);
-                    showAlert('Metrics reset successfully', 'info');
-                    break;
-                case 'top_n_tickers_update':
-                    updateTopNTickers(data.data);
-                    break;
-                default:
-                    console.log('Unknown WebSocket message type:', data.type);
+            try {
+                console.debug('WebSocket message received:', data.type, data);
+                
+                switch(data.type) {
+                    case 'metrics_update':
+                        if (data.data) {
+                            updateMetrics(data.data);
+                        } else {
+                            console.warn('metrics_update received with no data');
+                        }
+                        break;
+                    case 'status_update':
+                        // Handle comprehensive status update
+                        if (data.data && data.data.metrics) {
+                            updateMetrics(data.data.metrics);
+                        }
+                        if (data.data && data.data.system_info) {
+                            updateSystemStatus(data.data.system_info);
+                        }
+                        // Update charts if included
+                        if (data.data && (data.data.metrics || data.data.system_info)) {
+                            updateChartsWithData(data.data);
+                        }
+                        // Update reprocess switch to keep it synchronized
+                        updateReprocessSwitch();
+                        break;
+                    case 'sell_all_list_update':
+                        updateSellAllList(data.data);
+                        break;
+                    case 'audit_update':
+                        // Optionally refresh audit trail on new events
+                        if (currentPage === 1) {
+                            loadAuditTrail();
+                        }
+                        break;
+                    case 'metrics_reset':
+                        // Handle metrics reset
+                        if (data.data) {
+                            updateMetrics(data.data);
+                        }
+                        showAlert('Metrics reset successfully', 'info');
+                        break;
+                    case 'top_n_tickers_update':
+                        updateTopNTickers(data.data);
+                        break;
+                    default:
+                        console.log('Unknown WebSocket message type:', data.type);
+                }
+            } catch (error) {
+                console.error('Error handling WebSocket message:', error);
+                console.error('Message data:', data);
             }
         }
         
@@ -947,11 +966,34 @@
             });
         }
         
+        // Update reprocess switch based on current system status
+        function updateReprocessSwitch() {
+            // Load current finviz config to get reprocess status
+            fetch('/admin/finviz/config')
+                .then(response => response.json())
+                .then(data => {
+                    const reprocessSwitch = document.getElementById('reprocessEnabledSwitch');
+                    const reprocessWindowInput = document.getElementById('reprocessWindowInput');
+                    if (reprocessSwitch) {
+                        reprocessSwitch.checked = data.reprocess_enabled || false;
+                    }
+                    if (reprocessWindowInput) {
+                        reprocessWindowInput.value = data.reprocess_window_seconds || 300;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading reprocess status:', error);
+                });
+        }
+        
         // Load initial data
         async function loadInitialData() {
             try {
                 // Load status data
                 await loadSystemStatus();
+                
+                // Update reprocess switch
+                updateReprocessSwitch();
                 
                 // Load sell all list
                 await loadSellAllList();
@@ -968,7 +1010,7 @@
             }
         }
         
-        // Load system status
+        // Load system status - UPDATED VERSION 2.0
         async function loadSystemStatus() {
             try {
                 const response = await fetch('/admin/system-info');
@@ -976,6 +1018,8 @@
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 const data = await response.json();
+                
+                console.debug('System status data received:', data);
                 
                 updateMetrics(data.metrics);
                 updateSystemStatus(data.system_info);
@@ -987,58 +1031,85 @@
             }
         }
         
-        // Update metrics display
+        // Update metrics display - VERSION 3.0 (Fixed maxWorkers undefined error)
         function updateMetrics(metrics) {
-            if (!metrics) return;
+            if (!metrics) {
+                console.warn('updateMetrics called with no metrics data');
+                return;
+            }
             
-            document.getElementById('signalsReceived').textContent = metrics.signals_received || 0;
-            document.getElementById('signalsApproved').textContent = metrics.signals_approved || 0;
-            document.getElementById('signalsRejected').textContent = metrics.signals_rejected || 0;
-            document.getElementById('signalsForwarded').textContent = metrics.signals_forwarded_success || 0;
-            document.getElementById('processingQueueSize').textContent = metrics.processing_queue_size || 0;
-            document.getElementById('approvedQueueSize').textContent = metrics.approved_queue_size || 0;
-            document.getElementById('processingWorkersActive').textContent = metrics.processing_workers_active || 0;
-            document.getElementById('forwardingWorkersActive').textContent = metrics.forwarding_workers_active || 0;
-            
-            // Update worker progress bars
-            const maxForwardingWorkers = 5;
-            const maxProcessingWorkers = 16;
-            
-            // Processing workers progress bar
-            const activeProcessingWorkers = metrics.processing_workers_active || 0;
-            const processingPercent = (activeProcessingWorkers / maxWorkers) * 100;
-            document.getElementById('processingWorkerProgress').style.width = `${processingPercent}%`;
-            
-            // Forwarding workers progress bar
-            const activeForwardingWorkers = metrics.forwarding_workers_active || 0;
-            const forwardingPercent = (activeForwardingWorkers / maxWorkers) * 100;
-            document.getElementById('forwardingWorkerProgress').style.width = `${forwardingPercent}%`;
-              // Update approval chart with real data
-            if (approvalChart) {
-                const approved = metrics.signals_approved || 0;
-                const rejected = metrics.signals_rejected || 0;
-                const total = approved + rejected;
+            try {
+                // Basic metrics updates
+                document.getElementById('signalsReceived').textContent = metrics.signals_received || 0;
+                document.getElementById('signalsApproved').textContent = metrics.signals_approved || 0;
+                document.getElementById('signalsRejected').textContent = metrics.signals_rejected || 0;
+                document.getElementById('signalsForwarded').textContent = metrics.signals_forwarded_success || 0;
+                document.getElementById('processingQueueSize').textContent = metrics.processing_queue_size || 0;
+                document.getElementById('approvedQueueSize').textContent = metrics.approved_queue_size || 0;
+                document.getElementById('processingWorkersActive').textContent = metrics.processing_workers_active || 0;
+                document.getElementById('forwardingWorkersActive').textContent = metrics.forwarding_workers_active || 0;
                 
-                approvalChart.data.datasets[0].data = [approved, rejected];
-                approvalChart.update();
+                // Update worker progress bars - ensure variables are defined within scope
+                const maxForwardingWorkers = 5;  // Define exactly here
+                const maxProcessingWorkers = 16; // Define exactly here
                 
-                // Add data source note
-                const approvalContainer = document.querySelector('#approvalChart').parentElement;
-                let approvalNote = approvalContainer.querySelector('.approval-data-note');
-                if (!approvalNote) {
-                    approvalNote = document.createElement('small');
-                    approvalNote.className = 'approval-data-note text-muted d-block mt-2';
-                    approvalContainer.appendChild(approvalNote);
+                // Processing workers progress bar
+                const activeProcessingWorkers = parseInt(metrics.processing_workers_active) || 0;
+                const processingPercent = Math.min((activeProcessingWorkers / maxProcessingWorkers) * 100, 100);
+                const processingProgressBar = document.getElementById('processingWorkerProgress');
+                if (processingProgressBar) {
+                    processingProgressBar.style.width = `${processingPercent}%`;
                 }
                 
-                if (total > 0) {
-                    const approvalRate = ((approved / total) * 100).toFixed(1);
-                    approvalNote.textContent = `📊 Approval rate: ${approvalRate}% (${approved}/${total})`;
-                    approvalNote.className = 'approval-data-note text-success d-block mt-2';
-                } else {
-                    approvalNote.textContent = '📊 Waiting for signal data...';
-                    approvalNote.className = 'approval-data-note text-muted d-block mt-2';
+                // Forwarding workers progress bar
+                const activeForwardingWorkers = parseInt(metrics.forwarding_workers_active) || 0;
+                const forwardingPercent = Math.min((activeForwardingWorkers / maxForwardingWorkers) * 100, 100);
+                const forwardingProgressBar = document.getElementById('forwardingWorkerProgress');
+                if (forwardingProgressBar) {
+                    forwardingProgressBar.style.width = `${forwardingPercent}%`;
                 }
+                
+                // Update approval chart with real data
+                if (typeof approvalChart !== 'undefined' && approvalChart) {
+                    const approved = parseInt(metrics.signals_approved) || 0;
+                    const rejected = parseInt(metrics.signals_rejected) || 0;
+                    const total = approved + rejected;
+                    
+                    approvalChart.data.datasets[0].data = [approved, rejected];
+                    approvalChart.update();
+                    
+                    // Add data source note
+                    const approvalContainer = document.querySelector('#approvalChart');
+                    if (approvalContainer && approvalContainer.parentElement) {
+                        let approvalNote = approvalContainer.parentElement.querySelector('.approval-data-note');
+                        if (!approvalNote) {
+                            approvalNote = document.createElement('small');
+                            approvalNote.className = 'approval-data-note text-muted d-block mt-2';
+                            approvalContainer.parentElement.appendChild(approvalNote);
+                        }
+                        
+                        if (total > 0) {
+                            const approvalRate = ((approved / total) * 100).toFixed(1);
+                            approvalNote.textContent = `📊 Approval rate: ${approvalRate}% (${approved}/${total})`;
+                            approvalNote.className = 'approval-data-note text-success d-block mt-2';
+                        } else {
+                            approvalNote.textContent = '📊 Waiting for signal data...';
+                            approvalNote.className = 'approval-data-note text-muted d-block mt-2';
+                        }
+                    }
+                }
+                
+                console.debug('Metrics updated successfully:', {
+                    received: metrics.signals_received,
+                    approved: metrics.signals_approved,
+                    rejected: metrics.signals_rejected,
+                    processing_workers: activeProcessingWorkers,
+                    forwarding_workers: activeForwardingWorkers
+                });
+                
+            } catch (error) {
+                console.error('Error in updateMetrics function:', error);
+                console.error('Metrics data received:', metrics);
             }
         }
         
@@ -1066,6 +1137,23 @@
             } else {
                 rateLimiterStatus.textContent = 'Active';
                 rateLimiterStatus.className = 'badge badge-status bg-success';
+            }
+            
+            // Reprocess status
+            const reprocessStatus = document.getElementById('reprocessStatus');
+            const reprocessEnabled = systemInfo.reprocess_enabled || false;
+            if (reprocessEnabled) {
+                reprocessStatus.textContent = 'Active';
+                reprocessStatus.className = 'badge badge-status bg-success';
+            } else {
+                reprocessStatus.textContent = 'Disabled';
+                reprocessStatus.className = 'badge badge-status bg-secondary';
+            }
+            
+            // Update reprocess switch to reflect current state
+            const reprocessSwitch = document.getElementById('reprocessEnabledSwitch');
+            if (reprocessSwitch) {
+                reprocessSwitch.checked = reprocessEnabled;
             }
             
             // Ticker count
@@ -1984,6 +2072,11 @@
                 
                 if (response.ok) {
                     showAlert('Finviz configuration updated successfully!', 'success');
+                    // Update system status and reprocess switch to reflect changes
+                    setTimeout(() => {
+                        loadSystemStatus();
+                        updateReprocessSwitch();
+                    }, 1000);
                 } else {
                     const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
                     throw new Error(errorData.detail);
@@ -2026,6 +2119,11 @@
 
                 if (response.ok) {
                     showAlert('Reprocess configuration updated successfully!', 'success');
+                    // Update system status and reprocess switch to reflect changes
+                    setTimeout(() => {
+                        loadSystemStatus();
+                        updateReprocessSwitch();
+                    }, 1000);
                 } else {
                     const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
                     throw new Error(errorData.detail);
