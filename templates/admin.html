@@ -195,6 +195,43 @@
             transform: translateY(0);
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
+        
+        /* Database Management Discrete Controls */
+        .database-actions {
+            border-left: 1px solid #dee2e6;
+            padding-left: 12px;
+        }
+        
+        .database-actions .btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .database-actions .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .database-actions .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .database-actions .btn:disabled:hover {
+            transform: none;
+            box-shadow: none;
+        }
+        
+        #csvFileName {
+            font-size: 0.75rem;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -456,6 +493,7 @@
                     </div>
                 </div>
             </div>
+
         </div>
         
         <!-- Configuration Modal -->
@@ -732,7 +770,7 @@
                                 </div>
                             </div>
                             <div class="row mt-2">
-                                <div class="col-md-4">
+                                <div class="col-md-3">
                                     <label class="form-label">&nbsp;</label>
                                     <div class="d-grid">
                                         <button id="applyFiltersBtn" class="btn btn-primary btn-sm">
@@ -740,12 +778,31 @@
                                         </button>
                                     </div>
                                 </div>
-                                <div class="col-md-4">
+                                <div class="col-md-3">
                                     <label class="form-label">&nbsp;</label>
                                     <div class="d-grid">
                                         <button id="clearFiltersBtn" class="btn btn-outline-secondary btn-sm">
                                             <i class="bi bi-x-circle"></i> Clear
                                         </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted small">Database Actions</label>
+                                    <div class="d-flex gap-1 database-actions">
+                                        <button id="downloadCsvBtn" class="btn btn-outline-info btn-sm" title="Download Full Database (CSV)">
+                                            <i class="bi bi-download"></i>
+                                        </button>
+                                        <input type="file" class="form-control form-control-sm d-none" id="csvUploadInput" accept=".csv">
+                                        <button id="selectCsvBtn" class="btn btn-outline-warning btn-sm" title="Select CSV file to upload">
+                                            <i class="bi bi-folder2-open"></i>
+                                        </button>
+                                        <button id="uploadCsvBtn" class="btn btn-outline-success btn-sm" title="Upload selected CSV" disabled>
+                                            <i class="bi bi-upload"></i>
+                                        </button>
+                                        <button id="clearDatabaseBtn" class="btn btn-outline-danger btn-sm" title="Clear All Database Records">
+                                            <i class="bi bi-trash3"></i>
+                                        </button>
+                                        <small class="text-muted align-self-center ms-2" id="csvFileName"></small>
                                     </div>
                                 </div>
                             </div>
@@ -1637,6 +1694,13 @@
                 currentPage++;
                 loadAuditTrail();
             });
+            
+            // Database Management - CSV export/import
+            document.getElementById('downloadCsvBtn').addEventListener('click', downloadDatabaseCsv);
+            document.getElementById('selectCsvBtn').addEventListener('click', selectCsvFile);
+            document.getElementById('uploadCsvBtn').addEventListener('click', uploadDatabaseCsv);
+            document.getElementById('clearDatabaseBtn').addEventListener('click', clearDatabase);
+            document.getElementById('csvUploadInput').addEventListener('change', handleCsvFileSelection);
         }
 
         function handleReprocessingModeChange() {
@@ -1964,6 +2028,198 @@
             document.getElementById('hourFilter').value = '';
             currentPage = 1;
             loadAuditTrail();
+        }
+        
+        // Database Management - CSV Export/Import Functions
+        async function downloadDatabaseCsv() {
+            try {
+                showAlert('Preparing database export...', 'info');
+                
+                const response = await fetch('/admin/export-csv', {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'text/csv'
+                    }
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 204) {
+                        showAlert('No data available for export', 'warning');
+                        return;
+                    }
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const csvContent = await response.text();
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                
+                // Create download link
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `urban_chainsaw_database_export_${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                showAlert('Database export completed successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Error downloading CSV:', error);
+                showAlert(`Error downloading database export: ${error.message}`, 'danger');
+            }
+        }
+        
+        function selectCsvFile() {
+            document.getElementById('csvUploadInput').click();
+        }
+        
+        function handleCsvFileSelection() {
+            const fileInput = document.getElementById('csvUploadInput');
+            const uploadBtn = document.getElementById('uploadCsvBtn');
+            const fileNameDisplay = document.getElementById('csvFileName');
+            
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                fileNameDisplay.textContent = file.name;
+                uploadBtn.disabled = false;
+                uploadBtn.title = `Upload ${file.name}`;
+            } else {
+                fileNameDisplay.textContent = '';
+                uploadBtn.disabled = true;
+                uploadBtn.title = 'Select a CSV file first';
+            }
+        }
+        
+        async function uploadDatabaseCsv() {
+            const fileInput = document.getElementById('csvUploadInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showAlert('Please select a CSV file to upload', 'warning');
+                return;
+            }
+            
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                showAlert('Please select a valid CSV file', 'warning');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to import this CSV file? This will merge the data with existing database records. Existing records with the same signal_id will be updated.')) {
+                return;
+            }
+            
+            try {
+                // Get admin token
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Enter admin token:');
+                    if (!token) {
+                        showAlert('Admin token required for database import', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+                
+                showAlert('Uploading CSV file...', 'info');
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('token', token);
+                
+                const response = await fetch('/admin/import-csv', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const summary = data.summary || {};
+                    
+                    let summaryText = 'CSV import completed successfully!\n';
+                    summaryText += `• Signals created: ${summary.signals_created || 0}\n`;
+                    summaryText += `• Signals updated: ${summary.signals_updated || 0}\n`;
+                    summaryText += `• Events created: ${summary.events_created || 0}\n`;
+                    summaryText += `• Events updated: ${summary.events_updated || 0}`;
+                    
+                    showAlert(summaryText.replace(/\n/g, '<br>'), 'success');
+                    
+                    // Clear the file input and reset UI
+                    fileInput.value = '';
+                    handleCsvFileSelection();
+                    
+                    // Refresh audit trail to show updated data
+                    loadAuditTrail();
+                    
+                    // Refresh system status
+                    loadSystemStatus();
+                    
+                } else if (response.status === 403) {
+                    localStorage.removeItem('admin_token');
+                    showAlert('Invalid token. Please try again.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+                
+            } catch (error) {
+                console.error('Error uploading CSV:', error);
+                showAlert(`Error importing CSV file: ${error.message}`, 'danger');
+            }
+        }
+        
+        async function clearDatabase() {
+            if (!confirm('⚠️ Are you ABSOLUTELY SURE you want to PERMANENTLY DELETE ALL database records?\n\nThis action will:\n• Delete ALL signals and events\n• Remove ALL audit trail history\n• Cannot be undone\n\nType "DELETE ALL" in the next prompt to confirm.')) {
+                return;
+            }
+            
+            const confirmText = prompt('To proceed with deletion, type exactly: DELETE ALL');
+            if (confirmText !== 'DELETE ALL') {
+                showAlert('Database clear cancelled - confirmation text did not match', 'info');
+                return;
+            }
+            
+            try {
+                // Get admin token
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Enter admin token:');
+                    if (!token) {
+                        showAlert('Admin token required to clear database', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+                
+                showAlert('Clearing database... This may take a moment.', 'warning');
+                
+                const response = await fetch('/admin/clear-database', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showAlert(`Database cleared successfully! Deleted ${data.deleted_signals || 0} signals and ${data.deleted_events || 0} events.`, 'success');
+                    
+                    // Refresh all data displays
+                    loadAuditTrail();
+                    loadSystemStatus();
+                    
+                } else if (response.status === 403) {
+                    localStorage.removeItem('admin_token');
+                    showAlert('Invalid token. Please try again.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+                
+            } catch (error) {
+                console.error('Error clearing database:', error);
+                showAlert(`Error clearing database: ${error.message}`, 'danger');
+            }
         }
         
         // Show alert

@@ -40,7 +40,8 @@ from typing import Set, List, Any, Dict, Callable, Optional # Added Optional
 import json
 
 import httpx
-from fastapi import Body, FastAPI, BackgroundTasks, HTTPException, status, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, BackgroundTasks, HTTPException, status, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -1787,9 +1788,12 @@ async def get_admin_audit_trail(
                 "http_status": signal.get("http_status"),
                 "signal_type": signal.get("signal_type", "buy")  # Add signal_type
             }
-            events.append(main_event)
             
-            # Add individual events if available
+            # If we have a status filter, only add the main event if it matches
+            if not status_filter or main_event["event_type"].lower() == status_filter.lower():
+                events.append(main_event)
+            
+            # Add individual events if available, filtering by status if needed
             if signal.get("events"):
                 for event in signal["events"]:
                     # Ensure proper timestamp format
@@ -1804,18 +1808,22 @@ async def get_admin_audit_trail(
                         # If it's something else, convert to string
                         formatted_timestamp = str(event_timestamp) if event_timestamp else None
                     
-                    processed_event = {
-                        "timestamp": formatted_timestamp,
-                        "signal_id": event.get("signal_id", signal.get("signal_id", "")),
-                        "ticker": event.get("ticker", signal.get("ticker", "-")),
-                        "event_type": event.get("status", event.get("event_type", "unknown")),
-                        "location": event.get("location", "unknown"),
-                        "details": event.get("details", "-"),
-                        "worker_id": event.get("worker_id", "-"),
-                        "http_status": event.get("http_status"),
-                        "signal_type": event.get("signal_type", signal.get("signal_type", "buy"))  # Add signal_type
-                    }
-                    events.append(processed_event)
+                    event_status = event.get("status", event.get("event_type", "unknown"))
+                    
+                    # If we have a status filter, only add events that match
+                    if not status_filter or event_status.lower() == status_filter.lower():
+                        processed_event = {
+                            "timestamp": formatted_timestamp,
+                            "signal_id": event.get("signal_id", signal.get("signal_id", "")),
+                            "ticker": event.get("ticker", signal.get("ticker", "-")),
+                            "event_type": event_status,
+                            "location": event.get("location", "unknown"),
+                            "details": event.get("details", "-"),
+                            "worker_id": event.get("worker_id", "-"),
+                            "http_status": event.get("http_status"),
+                            "signal_type": event.get("signal_type", signal.get("signal_type", "buy"))  # Add signal_type
+                        }
+                        events.append(processed_event)
         
         # Sort events by timestamp (newest first)
         events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
@@ -1991,6 +1999,103 @@ async def get_webhook_config():
         }
     except Exception as e:
         _logger.error(f"Error getting webhook config: {e}")
+
+@app.get("/admin/export-csv", response_class=Response)
+async def export_database_to_csv():
+    """Exports the entire database content (signals and events) to a CSV file."""
+    try:
+        _logger.info("Received request to export database to CSV.")
+        data = await db_manager.get_all_signals_for_export()
+
+        if not data:
+            _logger.warning("No data found for CSV export.")
+            return PlainTextResponse("No data to export.", status_code=status.HTTP_204_NO_CONTENT)
+
+        # Determine all possible headers from all rows
+        all_keys = set()
+        for row in data:
+            all_keys.update(row.keys())
+        
+        # Sort keys for consistent CSV header order
+        headers = sorted(list(all_keys))
+
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=headers)
+
+        writer.writeheader()
+        writer.writerows(data)
+
+        csv_content = output.getvalue()
+        _logger.info(f"Successfully generated CSV with {len(data)} rows.")
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=urban_chainsaw_audit_trail.csv"}
+        )
+    except Exception as e:
+        _logger.error(f"Error exporting database to CSV: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error exporting data: {str(e)}")
+
+@app.post("/admin/import-csv", status_code=status.HTTP_200_OK)
+async def import_database_from_csv(file: UploadFile = File(...), token: str = Form(...)):
+    """Imports signal and event data from a CSV file into the database."""
+    if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/import-csv.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV files are supported.")
+
+    _logger.info(f"Received request to import CSV file: {file.filename}")
+
+    try:
+        content = await file.read()
+        csv_file = io.StringIO(content.decode('utf-8'))
+        reader = csv.DictReader(csv_file)
+        
+        # Convert reader to a list of dictionaries for processing
+        data_to_import = list(reader)
+
+        if not data_to_import:
+            _logger.warning("CSV file is empty or contains only headers.")
+            return {"message": "CSV file is empty or contains only headers. No data imported."}
+
+        import_summary = await db_manager.import_signals_from_csv(data_to_import)
+        _logger.info(f"CSV import completed. Summary: {import_summary}")
+
+        return {"message": "CSV data imported successfully.", "summary": import_summary}
+
+    except Exception as e:
+        _logger.error(f"Error importing CSV file: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error importing data: {str(e)}")
+
+@app.post("/admin/clear-database", status_code=status.HTTP_200_OK)
+async def clear_database(payload: dict = Body(...)):
+    """Clears all signals and events from the database. DESTRUCTIVE OPERATION!"""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/clear-database.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+
+    _logger.warning("Received request to CLEAR ALL DATABASE RECORDS. This is a destructive operation!")
+
+    try:
+        # Perform complete database clear
+        clear_result = await db_manager.clear_all_data()
+        
+        _logger.warning(f"Database cleared successfully. Result: {clear_result}")
+        
+        return {
+            "message": "Database cleared successfully.", 
+            "deleted_signals": clear_result.get("deleted_signals_count", 0),
+            "deleted_events": clear_result.get("deleted_events_count", 0)
+        }
+
+    except Exception as e:
+        _logger.error(f"Error clearing database: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error clearing database: {str(e)}")
+
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving webhook config")
 
 @app.get("/admin/finviz/config")

@@ -10,6 +10,7 @@
 # ==========================================================================================
 
 import logging
+import json
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime, timedelta
@@ -397,6 +398,26 @@ class DBManager:
                 "cutoff_date": cutoff_date.isoformat()
             }
 
+    async def clear_all_data(self) -> Dict[str, Any]:
+        """Completely clears all signals and events from the database. DESTRUCTIVE OPERATION!"""
+        async with self.get_session() as session:
+            # First delete all events (due to foreign key constraints)
+            events_delete_stmt = text("DELETE FROM signal_events")
+            events_result = await session.execute(events_delete_stmt)
+            deleted_events = events_result.rowcount
+            
+            # Then delete all signals
+            signals_delete_stmt = text("DELETE FROM signals")
+            signals_result = await session.execute(signals_delete_stmt)
+            deleted_signals = signals_result.rowcount
+
+            _logger.warning(f"Database completely cleared. Deleted {deleted_signals} signals and {deleted_events} events.")
+            return {
+                "deleted_signals_count": deleted_signals,
+                "deleted_events_count": deleted_events,
+                "operation": "clear_all_data"
+            }
+
     # --- Compatibility Methods (Legacy API) ---
     
     async def get_audit_trail(
@@ -553,7 +574,12 @@ class DBManager:
                 # Convert UUID to string for ILIKE search
                 query = query.where(Signal.signal_id.cast(String).ilike(f'%{signal_id_filter}%'))
             if status_filter:
-                query = query.where(Signal.status == status_filter)
+                # Filter by current signal status OR any event with that status
+                # This allows finding signals that passed through a specific status at any point
+                query = query.where(or_(
+                    Signal.status == status_filter,  # Current status
+                    Signal.events.any(SignalEvent.status == status_filter)  # Any event with that status
+                ))
             if signal_type_filter:  # NEW: Filter by signal type
                 query = query.where(Signal.signal_type == signal_type_filter)
             if ticker_filter:
@@ -681,8 +707,12 @@ class DBManager:
             # Convert UUID to string for ILIKE search
             filters.append(Signal.signal_id.cast(String).ilike(f"%{p.signal_id}%"))
         if p.status and p.status != 'all':
-            # Now using strings directly
-            filters.append(Signal.status == p.status.lower()) # Convert to lowercase
+            # Filter by current signal status OR any event with that status
+            # This allows finding signals that passed through a specific status at any point
+            filters.append(or_(
+                Signal.status == p.status.lower(),  # Current status
+                Signal.events.any(SignalEvent.status == p.status.lower())  # Any event with that status
+            ))
         if p.signal_type and p.signal_type != 'all':
             # NEW: Filter by signal type
             filters.append(Signal.signal_type == p.signal_type)
@@ -804,6 +834,163 @@ class DBManager:
             return 'DISCARDED'
         else:
             return 'COMPLETED' if status in ['completed'] else 'PROCESSING_QUEUE'
+
+    async def get_all_signals_for_export(self) -> List[Dict[str, Any]]:
+        """
+        Retrieves all signals and their associated events for CSV export.
+        Each event for a signal will result in a separate row, duplicating signal data.
+        """
+        async with self.get_session() as session:
+            query = select(Signal).options(selectinload(Signal.events)).order_by(Signal.created_at)
+            result = await session.execute(query)
+            signals = result.scalars().all()
+
+            export_data = []
+            for signal in signals:
+                signal_base_data = {
+                    "signal_id": str(signal.signal_id),
+                    "ticker": signal.ticker,
+                    "normalised_ticker": signal.normalised_ticker,
+                    "side": signal.side,
+                    "price": signal.price,
+                    "status": signal.status,
+                    "signal_type": signal.signal_type,
+                    "created_at": signal.created_at.isoformat() if signal.created_at else None,
+                    "updated_at": signal.updated_at.isoformat() if signal.updated_at else None,
+                    "processing_time_ms": signal.processing_time_ms,
+                    "error_message": signal.error_message,
+                    "retry_count": signal.retry_count,
+                    "original_signal_json": json.dumps(signal.original_signal) if signal.original_signal else "{}"
+                }
+
+                if signal.events:
+                    for event in signal.events:
+                        event_data = {
+                            "event_id": event.event_id,
+                            "event_timestamp": event.timestamp.isoformat() if event.timestamp else None,
+                            "event_status": event.status,
+                            "event_details": event.details,
+                            "event_worker_id": event.worker_id
+                        }
+                        export_data.append({**signal_base_data, **event_data})
+                else:
+                    # Include signals without events as well
+                    export_data.append({
+                        **signal_base_data,
+                        "event_id": None,
+                        "event_timestamp": None,
+                        "event_status": None,
+                        "event_details": None,
+                        "event_worker_id": None
+                    })
+            return export_data
+
+    async def import_signals_from_csv(self, data: List[Dict[str, Any]]) -> Dict[str, int]:
+        """
+        Imports signal and event data from a list of dictionaries (parsed from CSV).
+        Updates existing signals/events or creates new ones, ensuring consistency.
+        
+        Strategy for handling auto-increment event_id:
+        - For signals: Use signal_id as unique identifier for upsert
+        - For events: Use (signal_id, timestamp, status) as composite key for duplicate detection
+        - Let event_id auto-increment naturally during import
+        """
+        signals_created = 0
+        signals_updated = 0
+        events_created = 0
+        events_updated = 0
+        rows_skipped = 0
+
+        async with self.get_session() as session:
+            for row_index, row in enumerate(data):
+                try:
+                    signal_id = row.get("signal_id")
+                    event_id = row.get("event_id")
+
+                    if not signal_id:
+                        _logger.warning(f"Row {row_index + 1}: Skipping row due to missing signal_id")
+                        rows_skipped += 1
+                        continue
+
+                    # --- Process Signal Data ---
+                    signal_data = {
+                        "ticker": row.get("ticker"),
+                        "normalised_ticker": row.get("normalised_ticker"),
+                        "side": row.get("side"),
+                        "price": float(row["price"]) if row.get("price") and str(row.get("price")).strip() else None,
+                        "status": row.get("status"),
+                        "signal_type": row.get("signal_type"),
+                        "created_at": datetime.fromisoformat(row["created_at"].replace('Z', '+00:00')) if row.get("created_at") else datetime.utcnow(),
+                        "updated_at": datetime.fromisoformat(row["updated_at"].replace('Z', '+00:00')) if row.get("updated_at") else datetime.utcnow(),
+                        "processing_time_ms": int(row["processing_time_ms"]) if row.get("processing_time_ms") and str(row.get("processing_time_ms")).strip() else None,
+                        "error_message": row.get("error_message"),
+                        "retry_count": int(row["retry_count"]) if row.get("retry_count") and str(row.get("retry_count")).strip() else 0,
+                        "original_signal": json.loads(row["original_signal_json"]) if row.get("original_signal_json") and str(row.get("original_signal_json")).strip() != '{}' else {}
+                    }
+
+                    # Try to find existing signal
+                    existing_signal = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
+                    db_signal = existing_signal.scalar_one_or_none()
+
+                    if db_signal:
+                        # Update existing signal
+                        for key, value in signal_data.items():
+                            setattr(db_signal, key, value)
+                        signals_updated += 1
+                    else:
+                        # Create new signal
+                        db_signal = Signal(signal_id=signal_id, **signal_data)
+                        session.add(db_signal)
+                        signals_created += 1
+                    
+                    # --- Process Event Data (if event_id is present and valid) ---
+                    if event_id and row.get("event_timestamp"):
+                        event_data = {
+                            "signal_id": signal_id,
+                            "timestamp": datetime.fromisoformat(row["event_timestamp"].replace('Z', '+00:00')) if row.get("event_timestamp") else datetime.utcnow(),
+                            "status": row.get("event_status"),
+                            "details": row.get("event_details"),
+                            "worker_id": row.get("event_worker_id")
+                        }
+                        
+                        # For import, we look for duplicate events based on signal_id, timestamp, and status
+                        # instead of event_id, since event_id is auto-generated
+                        existing_event = await session.execute(select(SignalEvent).where(
+                            SignalEvent.signal_id == signal_id,
+                            SignalEvent.timestamp == event_data["timestamp"],
+                            SignalEvent.status == event_data["status"]
+                        ))
+                        db_event = existing_event.scalar_one_or_none()
+
+                        if db_event:
+                            # Update existing event (found by signal_id, timestamp, and status)
+                            for key, value in event_data.items():
+                                if key != "signal_id":  # Don't update the foreign key
+                                    setattr(db_event, key, value)
+                            events_updated += 1
+                        else:
+                            # Create new event (let event_id auto-increment)
+                            db_event = SignalEvent(**event_data)
+                            session.add(db_event)
+                            events_created += 1
+                            
+                except Exception as e:
+                    _logger.error(f"Row {row_index + 1}: Error processing row: {e}")
+                    _logger.debug(f"Problematic row data: {row}")
+                    rows_skipped += 1
+                    continue
+            
+            await session.flush() # Flush to ensure IDs are generated/updated before commit
+            await session.commit() # Commit all changes in one transaction
+
+        _logger.info(f"CSV Import Summary: Signals Created: {signals_created}, Signals Updated: {signals_updated}, Events Created: {events_created}, Events Updated: {events_updated}, Rows Skipped: {rows_skipped}")
+        return {
+            "signals_created": signals_created,
+            "signals_updated": signals_updated,
+            "events_created": events_created,
+            "events_updated": events_updated,
+            "rows_skipped": rows_skipped
+        }
 
 # Global Singleton Instance - to be imported throughout the application
 db_manager = DBManager()
