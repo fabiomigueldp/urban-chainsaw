@@ -388,13 +388,22 @@ def stop_existing_containers(use_sudo: bool = False) -> None:
         print_warning("Erro ao verificar containers existentes, continuando...")
 
 def cleanup_orphaned_containers(use_sudo: bool = False) -> None:
-    """Remove containers órfãos do docker-compose."""
-    print_step("Limpando containers órfãos...")
+    """Remove containers órfãos do docker-compose preservando volumes."""
+    print_step("Limpando containers órfãos (preservando volumes)...")
     
     try:
-        # Usa apenas docker compose (versão nova)
+        # IMPORTANTE: Não usar --volumes flag para preservar dados do banco
+        # Apenas remove containers órfãos, não volumes
         run_command(["docker", "compose", "down", "--remove-orphans"], use_sudo=use_sudo)
-        print_success("Containers órfãos removidos")
+        print_success("Containers órfãos removidos (volumes preservados)")
+        
+        # Verificar se o volume do banco ainda existe após limpeza
+        result = run_command(["docker", "volume", "ls", "--filter", "name=postgres_data", "--format", "{{.Name}}"])
+        if "postgres_data" in result.stdout:
+            print_success("✅ Volume do banco de dados preservado após limpeza")
+        else:
+            print_warning("⚠️ Volume do banco pode ter sido afetado")
+            
     except subprocess.CalledProcessError:
         print_warning("Erro ao limpar containers órfãos, continuando...")
 
@@ -561,6 +570,276 @@ def run_with_maximum_privileges() -> bool:
     
     return use_sudo_docker
 
+def quick_update_application(use_sudo: bool = False) -> bool:
+    """Quick update with maximum cache preservation - fastest update possible."""
+    print_step("⚡ Starting QUICK application update process...")
+    
+    # 1. Backup only essential configuration files (faster)
+    print_step("📦 Quick backup of essential config files...")
+    essential_configs = ['.env']  # Only backup .env to preserve database credentials
+    backup_dir = Path("quick_backup")
+    backup_dir.mkdir(exist_ok=True)
+    
+    backed_up_files = []
+    for config_file in essential_configs:
+        if Path(config_file).exists():
+            backup_path = backup_dir / f"{config_file}.backup"
+            import shutil
+            shutil.copy2(config_file, backup_path)
+            backed_up_files.append(config_file)
+            print_success(f"✅ Backed up: {config_file}")
+    
+    try:
+        # 2. Stop ONLY the application container (preserve database)
+        print_step("🛑 Quick stop of application container...")
+        
+        try:
+            result = run_command(["docker", "ps", "--filter", f"name={CONTAINER_NAME}", "--format", "{{.Names}}"])
+            if CONTAINER_NAME in result.stdout:
+                run_command(["docker", "compose", "stop", COMPOSE_SERVICE], use_sudo=use_sudo)
+                print_success("✅ Application container stopped (database preserved)")
+            else:
+                print_success("✅ Application container not running")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Could not stop application container: {e}")
+        
+        # 3. Pull latest changes from git (quick)
+        print_step("📥 Quick git pull...")
+        try:
+            run_command(["git", "pull", "--ff-only"], capture_output=False)
+            print_success("✅ Git pull completed")
+        except subprocess.CalledProcessError:
+            try:
+                # Fallback to fetch + reset if fast-forward fails
+                run_command(["git", "fetch", "origin"], capture_output=False)
+                run_command(["git", "reset", "--hard", "origin/main"], capture_output=False)
+                print_success("✅ Git update completed")
+            except subprocess.CalledProcessError as e:
+                print_warning(f"⚠️ Git update failed: {e} - continuing with current code")
+        
+        # 4. Restore essential config files
+        print_step("📋 Restoring essential configs...")
+        for config_file in backed_up_files:
+            backup_path = backup_dir / f"{config_file}.backup"
+            if backup_path.exists():
+                import shutil
+                shutil.copy2(backup_path, config_file)
+                print_success(f"✅ Restored: {config_file}")
+        
+        # 5. Quick build with MAXIMUM cache usage (only rebuild what changed)
+        print_step("🔨 Quick build with maximum cache...")
+        run_command(["docker", "compose", "build", COMPOSE_SERVICE], capture_output=False, use_sudo=use_sudo)
+        
+        # 6. Start services quickly
+        print_step("🚀 Quick start...")
+        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
+        
+        # 7. Quick health check (fewer attempts for speed)
+        print_step("⚡ Quick health check...")
+        for attempt in range(1, 11):  # Only 10 attempts instead of 30 for speed
+            try:
+                import urllib.request
+                response = urllib.request.urlopen(HEALTH_CHECK_URL, timeout=3)
+                if response.status == 200:
+                    print_success(f"⚡ Application online! (attempt {attempt}/10)")
+                    break
+            except:
+                pass
+            
+            if attempt < 10:
+                print(f"⏳ Quick check {attempt}/10...")
+                time.sleep(1)  # Shorter wait time
+        else:
+            print_warning("⚠️ Quick health check timeout - app may still be starting")
+        
+        print_success("⚡ QUICK UPDATE COMPLETED!")
+        return True
+            
+    except subprocess.CalledProcessError as e:
+        print_error(f"❌ Quick update failed: {e}")
+        return False
+    finally:
+        # Cleanup backup directory
+        import shutil
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+
+def check_database_volume_integrity() -> bool:
+    """Checks if the database volume exists and is properly configured."""
+    print_step("🔍 Checking database volume integrity...")
+    
+    try:
+        # Check if postgres_data volume exists (with project prefix)
+        result = run_command(["docker", "volume", "ls", "--filter", "name=postgres_data", "--format", "{{.Name}}"])
+        
+        # Check for both possible volume names
+        volume_found = False
+        for line in result.stdout.strip().split('\n'):
+            if 'postgres_data' in line:
+                print_success(f"✅ Database volume found: {line}")
+                volume_found = True
+                break
+        
+        if not volume_found:
+            print_warning("⚠️ Database volume not found - checking all volumes...")
+            result = run_command(["docker", "volume", "ls", "--format", "{{.Name}}"])
+            print(f"Available volumes: {result.stdout}")
+            return False
+            
+        return True
+            
+    except subprocess.CalledProcessError as e:
+        print_error(f"❌ Error checking database volume: {e}")
+        return False
+
+def protect_database_during_update() -> bool:
+    """Ensures database container and volume are preserved during updates."""
+    print_step("🛡️ Protecting database during update...")
+    
+    try:
+        # Check if database container is running
+        result = run_command(["docker", "ps", "--filter", "name=trading-db", "--format", "{{.Names}}"])
+        db_running = "trading-db" in result.stdout
+        
+        if db_running:
+            print_success("✅ Database container is running and will be preserved")
+        else:
+            print_warning("⚠️ Database container is not running - will start if needed")
+        
+        # Verify volume exists
+        if not check_database_volume_integrity():
+            print_warning("⚠️ Database volume check failed - continuing anyway")
+        
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print_error(f"❌ Error protecting database: {e}")
+        return False
+
+def update_application(use_sudo: bool = False) -> bool:
+    """Updates the application from git and rebuilds without affecting database."""
+    print_step("🔄 Starting full application update process...")
+    
+    # 1. Backup current configuration files
+    print_step("📦 Backing up current configuration files...")
+    config_files = ['finviz_config.json', 'webhook_config.json', 'system_config.json', '.env']
+    backup_dir = Path("config_backup")
+    backup_dir.mkdir(exist_ok=True)
+    
+    backed_up_files = []
+    for config_file in config_files:
+        if Path(config_file).exists():
+            backup_path = backup_dir / f"{config_file}.backup"
+            import shutil
+            shutil.copy2(config_file, backup_path)
+            backed_up_files.append(config_file)
+            print_success(f"✅ Backed up: {config_file}")
+    
+    try:
+        # 2. Stop ONLY the application container (preserve database)
+        print_step("🛑 Stopping application container (preserving database)...")
+        
+        try:
+            result = run_command(["docker", "ps", "--filter", f"name={CONTAINER_NAME}", "--format", "{{.Names}}"])
+            if CONTAINER_NAME in result.stdout:
+                print_success(f"✅ Found running application container: {CONTAINER_NAME}")
+                run_command(["docker", "compose", "stop", COMPOSE_SERVICE], use_sudo=use_sudo)
+                run_command(["docker", "compose", "rm", "-f", COMPOSE_SERVICE], use_sudo=use_sudo)
+                print_success("✅ Application container stopped and removed")
+            else:
+                print_warning("⚠️ Application container not running")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Could not check/stop application container: {e}")
+        
+        # Verify database is still running
+        print_step("🔍 Verifying database container is still running...")
+        try:
+            result = run_command(["docker", "ps", "--filter", "name=trading-db", "--format", "{{.Names}}"])
+            if "trading-db" in result.stdout:
+                print_success("✅ Database container is still running - data preserved!")
+            else:
+                print_warning("⚠️ Database container is not running - will be started")
+        except subprocess.CalledProcessError:
+            print_warning("⚠️ Could not verify database status")
+        
+        # 3. Pull latest changes from git
+        print_step("📥 Pulling latest changes from git...")
+        try:
+            run_command(["git", "fetch", "origin"], capture_output=False)
+            run_command(["git", "reset", "--hard", "origin/main"], capture_output=False)
+            print_success("✅ Git pull completed successfully")
+        except subprocess.CalledProcessError as e:
+            print_error(f"❌ Git pull failed: {e}")
+            print_warning("Continuing with current code version...")
+        
+        # 4. Restore backed up configuration files
+        print_step("📋 Restoring configuration files...")
+        for config_file in backed_up_files:
+            backup_path = backup_dir / f"{config_file}.backup"
+            if backup_path.exists():
+                import shutil
+                shutil.copy2(backup_path, config_file)
+                print_success(f"✅ Restored: {config_file}")
+        
+        # 5. Create any missing configuration files with defaults
+        create_missing_config_files()
+        
+        # 6. Rebuild ONLY the application container (not database)
+        print_step("🔨 Rebuilding application container...")
+        run_command(["docker", "compose", "build", "--no-cache", COMPOSE_SERVICE], capture_output=False, use_sudo=use_sudo)
+        
+        # 7. Start the services (database will already be running, app will start fresh)
+        print_step("🚀 Starting updated application...")
+        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
+        
+        # 8. Wait for application to be healthy
+        if wait_for_health_check():
+            print_success("🎉 Application update completed successfully!")
+            
+            # 9. Show final status
+            print_step("📊 Final status after update:")
+            show_status()
+            return True
+        else:
+            print_warning("⚠️ Application started but health check failed")
+            return False
+            
+    except subprocess.CalledProcessError as e:
+        print_error(f"❌ Update failed: {e}")
+        return False
+    finally:
+        # Cleanup backup directory
+        import shutil
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+
+def create_missing_config_files() -> None:
+    """Creates missing configuration files with default values."""
+    print_step("🔧 Creating missing configuration files...")
+    
+    config_defaults = {
+        'finviz_config.json': {
+            "finviz_url": "https://finviz.com/screener.ashx?v=150&f=sh_curvol_o200,sh_price_0.6to20,ta_changeopen_4to&ft=4&o=-changeopen&ar=10&c=0,1,24,25,60,64,67,86,87,65",
+            "top_n": 15,
+            "refresh_interval_sec": 10,
+            "reprocess_enabled": True,
+            "reprocess_window_seconds": 0
+        },
+        'webhook_config.json': {},
+        'system_config.json': {}
+    }
+    
+    for config_file, default_content in config_defaults.items():
+        if not Path(config_file).exists():
+            with open(config_file, 'w', encoding='utf-8') as f:
+                import json
+                json.dump(default_content, f, indent=4)
+            print_success(f"✅ Created {config_file} with defaults")
+        else:
+            print_success(f"✅ {config_file} already exists")
+
+# Insert this function before the other database functions
+
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(description="Script to run Trading Signal Processor")
@@ -569,6 +848,10 @@ def main():
     parser.add_argument("--status-only", action="store_true", help="Only show status, without restarting")
     parser.add_argument("--stop", action="store_true", help="Stop the application")
     parser.add_argument("--quick", action="store_true", help="Quick build (uses Docker cache)")
+    parser.add_argument("--update", action="store_true", help="Update application from git and rebuild (preserves database and configs)")
+    parser.add_argument("--upgrade", action="store_true", help="Alias for --update")
+    parser.add_argument("--quickupdate", action="store_true", help="Quick update with maximum cache preservation (preserves database)")
+    parser.add_argument("--quickupgrade", action="store_true", help="Alias for --quickupdate")
     
     args = parser.parse_args()
     
@@ -591,6 +874,60 @@ def main():
     # Check if should only show status
     if args.status_only:
         show_status()
+        return
+    
+    # Check if should do quick update
+    if args.quickupdate or args.quickupgrade:
+        print_step("⚡ Starting QUICK update process...")
+        
+        # Initial checks
+        print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
+        use_sudo = False  # Windows doesn't use sudo
+        
+        if not check_docker():
+            sys.exit(1)
+        
+        if not check_docker_compose():
+            sys.exit(1)
+        
+        # Protect database during update
+        if not protect_database_during_update():
+            print_error("❌ Failed to protect database - aborting update")
+            sys.exit(1)
+        
+        # Run quick update process
+        if quick_update_application(use_sudo):
+            print_success("⚡ QUICK UPDATE COMPLETED SUCCESSFULLY!")
+        else:
+            print_error("❌ Quick update failed!")
+            sys.exit(1)
+        return
+    
+    # Check if should do full update
+    if args.update or args.upgrade:
+        print_step("🔄 Starting FULL update process...")
+        
+        # Initial checks
+        print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
+        use_sudo = False  # Windows doesn't use sudo
+        
+        if not check_docker():
+            sys.exit(1)
+        
+        if not check_docker_compose():
+            sys.exit(1)
+        
+        # Protect database during update
+        if not protect_database_during_update():
+            print_error("❌ Failed to protect database - aborting update")
+            sys.exit(1)
+        
+        # Run full update process
+        if update_application(use_sudo):
+            print_success("🎉 FULL UPDATE COMPLETED SUCCESSFULLY!")
+        else:
+            print_error("❌ Full update failed!")
+            sys.exit(1)
         return
     
     # Initial checks
@@ -650,11 +987,18 @@ def main():
 ║  🎉 Application is running on port 80!                      ║
 ║  🔧 Running with MAXIMUM PRIVILEGES (ROOT)                  ║
 ║                                                              ║
-║  For quick update:        python run.py --quick             ║
+║  For quick build:         python run.py --quick             ║
+║  For quick update:        python run.py --quickupdate       ║  
+║  For full update:         python run.py --update            ║
+║  For upgrade:             python run.py --upgrade           ║
 ║  To view logs:            python run.py --logs              ║
 ║  To follow logs:          python run.py --follow-logs       ║
 ║  To view status:          python run.py --status-only       ║
 ║  To stop:                 python run.py --stop              ║
+║                                                              ║
+║  ⚡ QUICK UPDATE: Fastest update with maximum cache         ║
+║  🔄 FULL UPDATE: Complete rebuild for major changes        ║
+║  🛡️  Both preserve database and configuration files        ║
 ║                                                              ║
 ║  ⚠️  WARNING: Container running as ROOT to resolve          ║
 ║      file permission issues                                 ║

@@ -13,13 +13,9 @@ async def init_database(database_url: str):
     
     try:
         async with engine.begin() as conn:
-            # Drop existing tables (since we don't care about current data)
-            await conn.run_sync(Base.metadata.drop_all)
-            _logger.info("Dropped existing tables")
-            
-            # Create all tables fresh
+            # Create tables only if they don't exist (preserve existing data)
             await conn.run_sync(Base.metadata.create_all)
-            _logger.info("✅ Database tables created successfully")
+            _logger.info("✅ Database tables created successfully (preserving existing data)")
             
     except Exception as e:
         _logger.error(f"❌ Error creating database tables: {e}")
