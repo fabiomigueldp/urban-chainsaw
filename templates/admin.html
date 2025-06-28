@@ -324,12 +324,7 @@
                                 <span id="rateLimiterStatus" class="badge badge-status">-</span>
                             </div>
                         </div>
-                        <hr>
                         <div class="row">
-                            <div class="col-6">
-                                <strong>Reprocess Signals:</strong><br>
-                                <span id="reprocessStatus" class="badge badge-status">-</span>
-                            </div>
                             <div class="col-6">
                                 <strong>Top-N Tickers:</strong><br>
                                 <span id="tickerCount">-</span>
@@ -376,7 +371,7 @@
             </div>
         </div>
         
-        <!-- Control Actions -->
+        <!-- Control Actions and Reprocessing -->
         <div class="row mb-4">
             <div class="col-md-6">
                 <div class="card">
@@ -387,23 +382,58 @@
                     </div>
                     <div class="card-body">
                         <div class="action-buttons">
-                            <button id="pauseEngineBtn" class="btn btn-warning">
+                            <button id="pauseEngineBtn" class="btn btn-warning btn-sm">
                                 <i class="bi bi-pause"></i> Pause Engine
                             </button>
-                            <button id="resumeEngineBtn" class="btn btn-success">
+                            <button id="resumeEngineBtn" class="btn btn-success btn-sm">
                                 <i class="bi bi-play"></i> Resume Engine
                             </button>
-                            <button id="refreshEngineBtn" class="btn btn-info">
+                            <button id="refreshEngineBtn" class="btn btn-info btn-sm">
                                 <i class="bi bi-arrow-clockwise refresh-btn"></i> Refresh Tickers
                             </button>
-                            <button id="resetMetricsBtn" class="btn btn-secondary">
+                            <button id="resetMetricsBtn" class="btn btn-secondary btn-sm">
                                 <i class="bi bi-arrow-counterclockwise"></i> Reset Metrics
                             </button>
-                            <button id="pauseRateLimiterBtn" class="btn btn-warning">
+                            <button id="pauseRateLimiterBtn" class="btn btn-warning btn-sm">
                                 <i class="bi bi-pause"></i> Pause Rate Limiter
                             </button>
-                            <button id="resumeRateLimiterBtn" class="btn btn-success">
+                            <button id="resumeRateLimiterBtn" class="btn btn-success btn-sm">
                                 <i class="bi bi-play"></i> Resume Rate Limiter
+                            </button>
+                        </div>
+                        <hr>
+                        <h5 class="card-title mt-4">
+                            <i class="bi bi-arrow-repeat"></i> Signal Reprocessing Engine
+                        </h5>
+                        <!-- 1. Indicador de Status Principal -->
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">Status:</h6>
+                            <span id="reprocessingEngineStatus" class="badge bg-secondary fs-6">DISABLED</span>
+                        </div>
+
+                        <!-- 2. Controles Simplificados -->
+                        <div class="mb-3">
+                            <label for="reprocessingModeSelect" class="form-label">Operating Mode:</label>
+                            <select class="form-select" id="reprocessingModeSelect">
+                                <option value="disabled">Disabled</option>
+                                <option value="window">Time Window</option>
+                                <option value="infinite">Infinite Recovery</option>
+                            </select>
+                        </div>
+
+                        <!-- 3. Campo de Janela de Tempo (visível condicionalmente) -->
+                        <div id="reprocessingWindowContainer" class="mb-3" style="display: none;">
+                            <label for="reprocessingWindowInput" class="form-label">Lookback Window (seconds):</label>
+                            <input type="number" class="form-control" id="reprocessingWindowInput" value="300" min="1">
+                            <small class="form-text text-muted">
+                                How far back to look for rejected signals (e.g., 300s = 5 minutes).
+                            </small>
+                        </div>
+
+                        <!-- 4. Botão de Ação Unificado -->
+                        <div class="d-grid">
+                            <button id="applyReprocessingConfigBtn" class="btn btn-primary">
+                                <i class="bi bi-check-circle"></i> Apply Configuration
                             </button>
                         </div>
                     </div>
@@ -583,21 +613,7 @@
                         <div id="topNLastUpdate" class="mt-2">
                             <small class="text-muted">Last Update: <span id="topNTimestamp">-</span></small>
                         </div>
-                        <hr>
-                        <div>
-                            <h6>Reprocess Rejected Signals</h6>
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" role="switch" id="reprocessEnabledSwitch">
-                                <label class="form-check-label" for="reprocessEnabledSwitch">Enable Reprocessing</label>
-                            </div>
-                            <div class="mb-2">
-                                <label for="reprocessWindowInput" class="form-label">Reprocess Window (seconds):</label>
-                                <input type="number" class="form-control form-control-sm" id="reprocessWindowInput" value="300" min="30" max="3600">
-                            </div>
-                            <button id="updateReprocessConfigBtn" class="btn btn-outline-success btn-sm">
-                                <i class="bi bi-check-circle"></i> Apply Reprocess Settings
-                            </button>
-                        </div>
+                        
                     </div>
                 </div>
             </div>
@@ -861,7 +877,7 @@
                             updateChartsWithData(data.data);
                         }
                         // Update reprocess switch to keep it synchronized
-                        updateReprocessSwitch();
+                        updateReprocessingCard(data.data.system_info);
                         break;
                     case 'sell_all_list_update':
                         updateSellAllList(data.data);
@@ -966,34 +982,13 @@
             });
         }
         
-        // Update reprocess switch based on current system status
-        function updateReprocessSwitch() {
-            // Load current finviz config to get reprocess status
-            fetch('/admin/finviz/config')
-                .then(response => response.json())
-                .then(data => {
-                    const reprocessSwitch = document.getElementById('reprocessEnabledSwitch');
-                    const reprocessWindowInput = document.getElementById('reprocessWindowInput');
-                    if (reprocessSwitch) {
-                        reprocessSwitch.checked = data.reprocess_enabled || false;
-                    }
-                    if (reprocessWindowInput) {
-                        reprocessWindowInput.value = data.reprocess_window_seconds || 300;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading reprocess status:', error);
-                });
-        }
+        
         
         // Load initial data
         async function loadInitialData() {
             try {
                 // Load status data
                 await loadSystemStatus();
-                
-                // Update reprocess switch
-                updateReprocessSwitch();
                 
                 // Load sell all list
                 await loadSellAllList();
@@ -1137,23 +1132,6 @@
             } else {
                 rateLimiterStatus.textContent = 'Active';
                 rateLimiterStatus.className = 'badge badge-status bg-success';
-            }
-            
-            // Reprocess status
-            const reprocessStatus = document.getElementById('reprocessStatus');
-            const reprocessEnabled = systemInfo.reprocess_enabled || false;
-            if (reprocessEnabled) {
-                reprocessStatus.textContent = 'Active';
-                reprocessStatus.className = 'badge badge-status bg-success';
-            } else {
-                reprocessStatus.textContent = 'Disabled';
-                reprocessStatus.className = 'badge badge-status bg-secondary';
-            }
-            
-            // Update reprocess switch to reflect current state
-            const reprocessSwitch = document.getElementById('reprocessEnabledSwitch');
-            if (reprocessSwitch) {
-                reprocessSwitch.checked = reprocessEnabled;
             }
             
             // Ticker count
@@ -1624,7 +1602,10 @@
             
             // Top-N refresh button
             document.getElementById('refreshTopNBtn').addEventListener('click', loadTopNTickers);
-            document.getElementById('updateReprocessConfigBtn').addEventListener('click', updateReprocessConfig);
+
+            // Reprocessing card controls
+            document.getElementById('reprocessingModeSelect').addEventListener('change', handleReprocessingModeChange);
+            document.getElementById('applyReprocessingConfigBtn').addEventListener('click', applyReprocessingConfig);
             
             // Manual ticker input - add on Enter key
             document.getElementById('manualTickerInput').addEventListener('keypress', function(e) {
@@ -1656,6 +1637,96 @@
                 currentPage++;
                 loadAuditTrail();
             });
+        }
+
+        function handleReprocessingModeChange() {
+            const mode = document.getElementById('reprocessingModeSelect').value;
+            const windowContainer = document.getElementById('reprocessingWindowContainer');
+            if (mode === 'window') {
+                windowContainer.style.display = 'block';
+            } else {
+                windowContainer.style.display = 'none';
+            }
+        }
+
+        async function applyReprocessingConfig() {
+            const mode = document.getElementById('reprocessingModeSelect').value;
+            const windowSeconds = document.getElementById('reprocessingWindowInput').value;
+
+            let payload = {
+                reprocess_enabled: false,
+                reprocess_window_seconds: 0
+            };
+
+            if (mode === 'window') {
+                payload.reprocess_enabled = true;
+                payload.reprocess_window_seconds = parseInt(windowSeconds);
+            } else if (mode === 'infinite') {
+                payload.reprocess_enabled = true;
+                payload.reprocess_window_seconds = 0;
+            }
+
+            try {
+                let token = localStorage.getItem('admin_token');
+                if (!token) {
+                    token = prompt('Enter admin token:');
+                    if (!token) {
+                        showAlert('Token required to update reprocessing config', 'warning');
+                        return;
+                    }
+                    localStorage.setItem('admin_token', token);
+                }
+                payload.token = token;
+
+                const response = await fetch('/finviz/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    showAlert('Reprocessing configuration updated successfully', 'success');
+                    loadSystemStatus(); // Refresh system status to reflect changes
+                } else if (response.status === 403) {
+                    localStorage.removeItem('admin_token');
+                    showAlert('Invalid token. Please try again.', 'danger');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error updating reprocessing config:', error);
+                showAlert(`Error updating reprocessing config: ${error.message}`, 'danger');
+            }
+        }
+
+        function updateReprocessingCard(systemInfo) {
+            if (!systemInfo) return;
+
+            const statusBadge = document.getElementById('reprocessingEngineStatus');
+            const modeSelect = document.getElementById('reprocessingModeSelect');
+            const windowContainer = document.getElementById('reprocessingWindowContainer');
+            const windowInput = document.getElementById('reprocessingWindowInput');
+
+            const reprocessMode = systemInfo.reprocess_mode || 'Disabled';
+
+            if (reprocessMode === 'Disabled') {
+                statusBadge.textContent = 'DISABLED';
+                statusBadge.className = 'badge bg-secondary fs-6';
+                modeSelect.value = 'disabled';
+                windowContainer.style.display = 'none';
+            } else if (reprocessMode === 'Infinite') {
+                statusBadge.textContent = 'ACTIVE (Infinite)';
+                statusBadge.className = 'badge bg-info fs-6';
+                modeSelect.value = 'infinite';
+                windowContainer.style.display = 'none';
+            } else { // Time window
+                statusBadge.textContent = `ACTIVE (${systemInfo.reprocess_window_seconds}s Window)`;
+                statusBadge.className = 'badge bg-success fs-6';
+                modeSelect.value = 'window';
+                windowContainer.style.display = 'block';
+                windowInput.value = systemInfo.reprocess_window_seconds || 300;
+            }
         }
         
         // Send control command

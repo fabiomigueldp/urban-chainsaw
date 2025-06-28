@@ -440,20 +440,27 @@ class DBManager:
     async def get_rejected_signals_for_reprocessing(self, ticker: str, window_seconds: int) -> List[Dict[str, Any]]:
         """
         Retrieves signals for a specific ticker that were rejected within a given time window.
+        If window_seconds is 0, it retrieves all rejected signals for the ticker (infinite window).
         Returns a list of dictionaries, where each dictionary represents a signal.
         """
         async with self.get_session() as session:
-            cutoff_time = datetime.utcnow() - timedelta(seconds=window_seconds)
-
+            
+            # Base query
             stmt = (
                 select(Signal)
                 .where(
                     Signal.normalised_ticker == ticker.upper(),
-                    Signal.status == SignalStatusEnum.REJECTED.value, # Comparing with string value
-                    Signal.created_at >= cutoff_time
+                    Signal.status == SignalStatusEnum.REJECTED.value
                 )
-                .order_by(desc(Signal.created_at)) # Process newer ones first if multiple
             )
+
+            # Conditionally add time window filter
+            if window_seconds > 0:
+                cutoff_time = datetime.utcnow() - timedelta(seconds=window_seconds)
+                stmt = stmt.where(Signal.created_at >= cutoff_time)
+            
+            # Add ordering
+            stmt = stmt.order_by(desc(Signal.created_at)) # Process newer ones first if multiple
 
             result = await session.execute(stmt)
             signals = result.scalars().all()
@@ -475,7 +482,13 @@ class DBManager:
                 }
                 signal_list.append(signal_data)
 
-            _logger.debug(f"Found {len(signal_list)} rejected signals for ticker {ticker} within {window_seconds}s for reprocessing.")
+            log_msg = f"Found {len(signal_list)} rejected signals for ticker {ticker}"
+            if window_seconds > 0:
+                log_msg += f" within {window_seconds}s for reprocessing."
+            else:
+                log_msg += " (infinite window) for reprocessing."
+            _logger.debug(log_msg)
+            
             return signal_list
 
     async def reapprove_signal(self, signal_id: str, details: str) -> bool:

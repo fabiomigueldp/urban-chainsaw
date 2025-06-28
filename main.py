@@ -630,10 +630,23 @@ async def get_system_info_data() -> Dict[str, Any]:
         # Get reprocess status from finviz config
         try:
             finviz_config = load_finviz_config()
-            system_info["reprocess_enabled"] = finviz_config.get("reprocess_enabled", False)
+            reprocess_enabled = finviz_config.get("reprocess_enabled", False)
+            reprocess_window = finviz_config.get("reprocess_window_seconds", 300)
+            
+            system_info["reprocess_enabled"] = reprocess_enabled
+            
+            # Determine reprocess_mode for frontend
+            if not reprocess_enabled:
+                system_info["reprocess_mode"] = "Disabled"
+            elif reprocess_window == 0:
+                system_info["reprocess_mode"] = "Infinite"
+            else:
+                system_info["reprocess_mode"] = f"{reprocess_window}s Window"
+
         except Exception as e:
             _logger.warning(f"Could not load finviz config for reprocess status: {e}")
             system_info["reprocess_enabled"] = False
+            system_info["reprocess_mode"] = "Unknown"
         
         return system_info
         
