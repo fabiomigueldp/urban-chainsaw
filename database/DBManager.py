@@ -894,103 +894,169 @@ class DBManager:
         - For signals: Use signal_id as unique identifier for upsert
         - For events: Use (signal_id, timestamp, status) as composite key for duplicate detection
         - Let event_id auto-increment naturally during import
+        - Use manual session management to handle rollback properly
+        - Implement robust error handling for individual rows
         """
         signals_created = 0
         signals_updated = 0
         events_created = 0
         events_updated = 0
         rows_skipped = 0
+        errors = []
 
-        async with self.get_session() as session:
+        if not self._initialized:
+            raise RuntimeError("DatabaseManager not initialized. Call initialize() first.")
+
+        session: AsyncSession = self.async_session_factory()
+        try:
+            _logger.info(f"Starting CSV import with {len(data)} rows")
+            
             for row_index, row in enumerate(data):
+                row_processed = False
                 try:
                     signal_id = row.get("signal_id")
                     event_id = row.get("event_id")
 
-                    if not signal_id:
-                        _logger.warning(f"Row {row_index + 1}: Skipping row due to missing signal_id")
+                    if not signal_id or str(signal_id).strip() == "":
+                        _logger.warning(f"Row {row_index + 1}: Skipping row due to missing or empty signal_id")
                         rows_skipped += 1
                         continue
 
                     # --- Process Signal Data ---
-                    signal_data = {
-                        "ticker": row.get("ticker"),
-                        "normalised_ticker": row.get("normalised_ticker"),
-                        "side": row.get("side"),
-                        "price": float(row["price"]) if row.get("price") and str(row.get("price")).strip() else None,
-                        "status": row.get("status"),
-                        "signal_type": row.get("signal_type"),
-                        "created_at": datetime.fromisoformat(row["created_at"].replace('Z', '+00:00')) if row.get("created_at") else datetime.utcnow(),
-                        "updated_at": datetime.fromisoformat(row["updated_at"].replace('Z', '+00:00')) if row.get("updated_at") else datetime.utcnow(),
-                        "processing_time_ms": int(row["processing_time_ms"]) if row.get("processing_time_ms") and str(row.get("processing_time_ms")).strip() else None,
-                        "error_message": row.get("error_message"),
-                        "retry_count": int(row["retry_count"]) if row.get("retry_count") and str(row.get("retry_count")).strip() else 0,
-                        "original_signal": json.loads(row["original_signal_json"]) if row.get("original_signal_json") and str(row.get("original_signal_json")).strip() != '{}' else {}
-                    }
+                    try:
+                        signal_data = {
+                            "ticker": row.get("ticker"),
+                            "normalised_ticker": row.get("normalised_ticker"),
+                            "side": row.get("side"),
+                            "price": float(row["price"]) if row.get("price") and str(row.get("price")).strip() and str(row.get("price")).strip() != "None" else None,
+                            "status": row.get("status"),
+                            "signal_type": row.get("signal_type"),
+                            "created_at": datetime.fromisoformat(row["created_at"].replace('Z', '+00:00')) if row.get("created_at") else datetime.utcnow(),
+                            "updated_at": datetime.fromisoformat(row["updated_at"].replace('Z', '+00:00')) if row.get("updated_at") else datetime.utcnow(),
+                            "processing_time_ms": int(row["processing_time_ms"]) if row.get("processing_time_ms") and str(row.get("processing_time_ms")).strip() and str(row.get("processing_time_ms")).strip() != "None" else None,
+                            "error_message": row.get("error_message"),
+                            "retry_count": int(row["retry_count"]) if row.get("retry_count") and str(row.get("retry_count")).strip() and str(row.get("retry_count")).strip() != "None" else 0,
+                            "original_signal": json.loads(row["original_signal_json"]) if row.get("original_signal_json") and str(row.get("original_signal_json")).strip() and str(row.get("original_signal_json")).strip() not in ['{}', 'None'] else {}
+                        }
+                    except (ValueError, json.JSONDecodeError) as e:
+                        _logger.error(f"Row {row_index + 1}: Error parsing signal data: {e}")
+                        rows_skipped += 1
+                        errors.append(f"Row {row_index + 1}: Error parsing data - {str(e)}")
+                        continue
 
-                    # Try to find existing signal
-                    existing_signal = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
-                    db_signal = existing_signal.scalar_one_or_none()
+                    # Try to find existing signal using UPSERT logic
+                    try:
+                        existing_signal = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
+                        db_signal = existing_signal.scalar_one_or_none()
 
-                    if db_signal:
-                        # Update existing signal
-                        for key, value in signal_data.items():
-                            setattr(db_signal, key, value)
-                        signals_updated += 1
-                    else:
-                        # Create new signal
-                        db_signal = Signal(signal_id=signal_id, **signal_data)
-                        session.add(db_signal)
-                        signals_created += 1
+                        if db_signal:
+                            # Update existing signal - only update fields that have changed
+                            updated_fields = []
+                            for key, value in signal_data.items():
+                                current_value = getattr(db_signal, key)
+                                if current_value != value:
+                                    setattr(db_signal, key, value)
+                                    updated_fields.append(key)
+                            
+                            if updated_fields:
+                                signals_updated += 1
+                                _logger.debug(f"Updated signal {signal_id}, fields: {updated_fields}")
+                        else:
+                            # Create new signal
+                            db_signal = Signal(signal_id=signal_id, **signal_data)
+                            session.add(db_signal)
+                            signals_created += 1
+                            _logger.debug(f"Created new signal {signal_id}")
+                    
+                    except Exception as e:
+                        _logger.error(f"Row {row_index + 1}: Error processing signal {signal_id}: {e}")
+                        rows_skipped += 1
+                        errors.append(f"Row {row_index + 1}: Signal error - {str(e)}")
+                        continue
                     
                     # --- Process Event Data (if event_id is present and valid) ---
-                    if event_id and row.get("event_timestamp"):
-                        event_data = {
-                            "signal_id": signal_id,
-                            "timestamp": datetime.fromisoformat(row["event_timestamp"].replace('Z', '+00:00')) if row.get("event_timestamp") else datetime.utcnow(),
-                            "status": row.get("event_status"),
-                            "details": row.get("event_details"),
-                            "worker_id": row.get("event_worker_id")
-                        }
-                        
-                        # For import, we look for duplicate events based on signal_id, timestamp, and status
-                        # instead of event_id, since event_id is auto-generated
-                        existing_event = await session.execute(select(SignalEvent).where(
-                            SignalEvent.signal_id == signal_id,
-                            SignalEvent.timestamp == event_data["timestamp"],
-                            SignalEvent.status == event_data["status"]
-                        ))
-                        db_event = existing_event.scalar_one_or_none()
+                    if event_id and str(event_id).strip() and row.get("event_timestamp"):
+                        try:
+                            event_data = {
+                                "signal_id": signal_id,
+                                "timestamp": datetime.fromisoformat(row["event_timestamp"].replace('Z', '+00:00')) if row.get("event_timestamp") else datetime.utcnow(),
+                                "status": row.get("event_status"),
+                                "details": row.get("event_details"),
+                                "worker_id": row.get("event_worker_id")
+                            }
+                            
+                            # For import, we look for duplicate events based on signal_id, timestamp, and status
+                            # This prevents duplicate events when importing the same CSV multiple times
+                            existing_event = await session.execute(select(SignalEvent).where(
+                                SignalEvent.signal_id == signal_id,
+                                SignalEvent.timestamp == event_data["timestamp"],
+                                SignalEvent.status == event_data["status"]
+                            ))
+                            db_event = existing_event.scalar_one_or_none()
 
-                        if db_event:
-                            # Update existing event (found by signal_id, timestamp, and status)
-                            for key, value in event_data.items():
-                                if key != "signal_id":  # Don't update the foreign key
-                                    setattr(db_event, key, value)
-                            events_updated += 1
-                        else:
-                            # Create new event (let event_id auto-increment)
-                            db_event = SignalEvent(**event_data)
-                            session.add(db_event)
-                            events_created += 1
+                            if db_event:
+                                # Update existing event (found by signal_id, timestamp, and status)
+                                updated_fields = []
+                                for key, value in event_data.items():
+                                    if key != "signal_id":  # Don't update the foreign key
+                                        current_value = getattr(db_event, key)
+                                        if current_value != value:
+                                            setattr(db_event, key, value)
+                                            updated_fields.append(key)
+                                
+                                if updated_fields:
+                                    events_updated += 1
+                                    _logger.debug(f"Updated event for signal {signal_id}, fields: {updated_fields}")
+                            else:
+                                # Create new event (let event_id auto-increment)
+                                db_event = SignalEvent(**event_data)
+                                session.add(db_event)
+                                events_created += 1
+                                _logger.debug(f"Created new event for signal {signal_id}")
+                        
+                        except Exception as e:
+                            _logger.error(f"Row {row_index + 1}: Error processing event for signal {signal_id}: {e}")
+                            # Don't skip the entire row for event errors, signal might still be valid
+                            errors.append(f"Row {row_index + 1}: Event error - {str(e)}")
+                    
+                    row_processed = True
                             
                 except Exception as e:
-                    _logger.error(f"Row {row_index + 1}: Error processing row: {e}")
+                    _logger.error(f"Row {row_index + 1}: Unexpected error processing row: {e}")
                     _logger.debug(f"Problematic row data: {row}")
-                    rows_skipped += 1
+                    if not row_processed:
+                        rows_skipped += 1
+                    errors.append(f"Row {row_index + 1}: Unexpected error - {str(e)}")
+                    # Continue processing other rows - don't fail the entire import for one bad row
                     continue
             
-            await session.flush() # Flush to ensure IDs are generated/updated before commit
-            await session.commit() # Commit all changes in one transaction
+            # Flush and commit all changes in one transaction
+            await session.flush()
+            await session.commit()
+            _logger.info(f"CSV Import completed successfully. Transaction committed.")
 
-        _logger.info(f"CSV Import Summary: Signals Created: {signals_created}, Signals Updated: {signals_updated}, Events Created: {events_created}, Events Updated: {events_updated}, Rows Skipped: {rows_skipped}")
-        return {
+        except Exception as e:
+            await session.rollback()
+            _logger.error(f"Database error during CSV import, transaction rolled back: {e}", exc_info=True)
+            raise RuntimeError(f"CSV import failed: {str(e)}")
+        finally:
+            await session.close()
+
+        summary = {
             "signals_created": signals_created,
             "signals_updated": signals_updated,
             "events_created": events_created,
             "events_updated": events_updated,
-            "rows_skipped": rows_skipped
+            "rows_skipped": rows_skipped,
+            "errors": errors[:10] if errors else []  # Limit to first 10 errors to avoid huge responses
         }
+        
+        _logger.info(f"CSV Import Summary: Signals Created: {signals_created}, Signals Updated: {signals_updated}, Events Created: {events_created}, Events Updated: {events_updated}, Rows Skipped: {rows_skipped}, Errors: {len(errors)}")
+        
+        if errors:
+            _logger.warning(f"CSV Import had {len(errors)} errors. First few: {errors[:3]}")
+        
+        return summary
 
 # Global Singleton Instance - to be imported throughout the application
 db_manager = DBManager()

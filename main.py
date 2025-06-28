@@ -2059,16 +2059,38 @@ async def import_database_from_csv(file: UploadFile = File(...), token: str = Fo
 
         if not data_to_import:
             _logger.warning("CSV file is empty or contains only headers.")
-            return {"message": "CSV file is empty or contains only headers. No data imported."}
+            return {"message": "CSV file is empty or contains only headers. No data imported.", "summary": {}}
 
         import_summary = await db_manager.import_signals_from_csv(data_to_import)
         _logger.info(f"CSV import completed. Summary: {import_summary}")
 
-        return {"message": "CSV data imported successfully.", "summary": import_summary}
+        # Prepare response message based on results
+        total_rows = len(data_to_import)
+        processed_rows = import_summary.get("signals_created", 0) + import_summary.get("signals_updated", 0)
+        skipped_rows = import_summary.get("rows_skipped", 0)
+        error_count = len(import_summary.get("errors", []))
+        
+        if processed_rows == total_rows and error_count == 0:
+            message = f"CSV data imported successfully. All {total_rows} rows processed."
+        elif processed_rows > 0:
+            message = f"CSV data partially imported. {processed_rows} rows processed, {skipped_rows} rows skipped."
+            if error_count > 0:
+                message += f" {error_count} errors occurred during import."
+        else:
+            message = "CSV import failed. No rows were processed successfully."
+            if error_count > 0:
+                message += f" {error_count} errors occurred."
 
+        return {"message": message, "summary": import_summary}
+
+    except RuntimeError as e:
+        # These are our controlled errors from the import process
+        _logger.error(f"Controlled error importing CSV file: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        _logger.error(f"Error importing CSV file: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error importing data: {str(e)}")
+        # Unexpected errors
+        _logger.error(f"Unexpected error importing CSV file: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error importing data: {str(e)}")
 
 @app.post("/admin/clear-database", status_code=status.HTTP_200_OK)
 async def clear_database(payload: dict = Body(...)):

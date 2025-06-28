@@ -2137,13 +2137,31 @@
                     const data = await response.json();
                     const summary = data.summary || {};
                     
-                    let summaryText = 'CSV import completed successfully!\n';
+                    let summaryText = 'CSV import completed!\n';
                     summaryText += `• Signals created: ${summary.signals_created || 0}\n`;
                     summaryText += `• Signals updated: ${summary.signals_updated || 0}\n`;
                     summaryText += `• Events created: ${summary.events_created || 0}\n`;
                     summaryText += `• Events updated: ${summary.events_updated || 0}`;
                     
-                    showAlert(summaryText.replace(/\n/g, '<br>'), 'success');
+                    if (summary.rows_skipped && summary.rows_skipped > 0) {
+                        summaryText += `\n• Rows skipped: ${summary.rows_skipped}`;
+                    }
+                    
+                    if (summary.errors && summary.errors.length > 0) {
+                        summaryText += `\n• Errors: ${summary.errors.length}`;
+                        if (summary.errors.length > 0) {
+                            summaryText += '\n\nFirst few errors:';
+                            summary.errors.slice(0, 3).forEach(error => {
+                                summaryText += `\n  - ${error}`;
+                            });
+                            if (summary.errors.length > 3) {
+                                summaryText += `\n  ... and ${summary.errors.length - 3} more errors`;
+                            }
+                        }
+                    }
+                    
+                    const alertType = (summary.errors && summary.errors.length > 0) ? 'warning' : 'success';
+                    showAlert(summaryText.replace(/\n/g, '<br>'), alertType);
                     
                     // Clear the file input and reset UI
                     fileInput.value = '';
