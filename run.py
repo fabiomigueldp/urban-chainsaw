@@ -838,8 +838,114 @@ def create_missing_config_files() -> None:
         else:
             print_success(f"✅ {config_file} already exists")
 
-# Insert this function before the other database functions
+def rebuild_application_from_scratch(use_sudo: bool = False) -> bool:
+    """Complete rebuild - removes all containers, volumes, images and rebuilds everything from scratch."""
+    print_step("🔥 Starting COMPLETE REBUILD from scratch...")
+    print_colored("⚠️  WARNING: This will DELETE ALL DATA including database! ⚠️", Colors.WARNING)
+    
+    # Confirm the destructive operation
+    print_colored("\n🚨 DESTRUCTIVE OPERATION CONFIRMATION 🚨", Colors.FAIL)
+    print_colored("This will permanently delete:", Colors.WARNING)
+    print_colored("  • All application containers", Colors.WARNING)
+    print_colored("  • All database data and volumes", Colors.WARNING)
+    print_colored("  • All Docker images for this project", Colors.WARNING)
+    print_colored("  • All cached build layers", Colors.WARNING)
+    
+    try:
+        # 1. Stop and remove ALL containers and volumes
+        print_step("🛑 Stopping and removing ALL containers and volumes...")
+        try:
+            # Stop all services
+            run_command(["docker", "compose", "down"], use_sudo=use_sudo, check=False)
+            # Remove with volumes (destructive)
+            run_command(["docker", "compose", "down", "--volumes", "--remove-orphans"], use_sudo=use_sudo)
+            print_success("✅ All containers and volumes removed")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error stopping containers: {e}")
+        
+        # 2. Remove all Docker images related to this project
+        print_step("🗑️ Removing all project Docker images...")
+        try:
+            # Get all images related to this project
+            result = run_command(["docker", "images", "--filter", "reference=urban-chainsaw*", "--format", "{{.ID}}"])
+            if result.stdout.strip():
+                image_ids = result.stdout.strip().split('\n')
+                for image_id in image_ids:
+                    run_command(["docker", "rmi", "-f", image_id], use_sudo=use_sudo, check=False)
+                print_success(f"✅ Removed {len(image_ids)} project images")
+            else:
+                print_success("✅ No project images found to remove")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error removing images: {e}")
+        
+        # 3. Remove all volumes with project name
+        print_step("💾 Removing all project volumes...")
+        try:
+            result = run_command(["docker", "volume", "ls", "--filter", "name=urban-chainsaw", "--format", "{{.Name}}"])
+            if result.stdout.strip():
+                volume_names = result.stdout.strip().split('\n')
+                for volume_name in volume_names:
+                    run_command(["docker", "volume", "rm", "-f", volume_name], use_sudo=use_sudo, check=False)
+                print_success(f"✅ Removed {len(volume_names)} project volumes")
+            else:
+                print_success("✅ No project volumes found to remove")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error removing volumes: {e}")
+        
+        # 4. Clean Docker build cache
+        print_step("🧹 Cleaning Docker build cache...")
+        try:
+            run_command(["docker", "builder", "prune", "-f"], use_sudo=use_sudo)
+            print_success("✅ Docker build cache cleaned")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error cleaning build cache: {e}")
+        
+        # 5. Clean any local temporary directories
+        print_step("📁 Cleaning local temporary files...")
+        temp_dirs = ["logs", "data"]
+        for temp_dir in temp_dirs:
+            temp_path = Path(temp_dir)
+            if temp_path.exists():
+                import shutil
+                shutil.rmtree(temp_path)
+                temp_path.mkdir(exist_ok=True)
+                print_success(f"✅ Cleaned directory: {temp_dir}")
+        
+        # 6. Remove any backup directories
+        backup_dirs = ["config_backup", "quick_backup"]
+        for backup_dir in backup_dirs:
+            backup_path = Path(backup_dir)
+            if backup_path.exists():
+                import shutil
+                shutil.rmtree(backup_path)
+                print_success(f"✅ Removed backup directory: {backup_dir}")
+        
+        # 7. Complete rebuild from scratch
+        print_step("🔨 Building everything from scratch (no cache)...")
+        run_command(["docker", "compose", "build", "--no-cache", "--pull"], capture_output=False, use_sudo=use_sudo)
+        
+        # 8. Start fresh services
+        print_step("🚀 Starting fresh application...")
+        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
+        
+        # 9. Wait for application to be healthy
+        if wait_for_health_check():
+            print_success("🎉 COMPLETE REBUILD SUCCESSFUL!")
+            print_colored("✨ Everything is fresh and clean!", Colors.OKGREEN)
+            
+            # 10. Show final status
+            print_step("📊 Fresh deployment status:")
+            show_status()
+            return True
+        else:
+            print_warning("⚠️ Application started but health check failed")
+            return False
+            
+    except subprocess.CalledProcessError as e:
+        print_error(f"❌ Rebuild failed: {e}")
+        return False
 
+# Insert before main function
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(description="Script to run Trading Signal Processor")
@@ -852,6 +958,7 @@ def main():
     parser.add_argument("--upgrade", action="store_true", help="Alias for --update")
     parser.add_argument("--quickupdate", action="store_true", help="Quick update with maximum cache preservation (preserves database)")
     parser.add_argument("--quickupgrade", action="store_true", help="Alias for --quickupdate")
+    parser.add_argument("--rebuild", action="store_true", help="Complete rebuild - removes all containers, volumes, images and rebuilds everything from scratch (DESTRUCTIVE)")
     
     args = parser.parse_args()
     
@@ -874,6 +981,28 @@ def main():
     # Check if should only show status
     if args.status_only:
         show_status()
+        return
+    
+    # Check if should do complete rebuild
+    if args.rebuild:
+        print_step("🔥 Starting COMPLETE REBUILD process...")
+        
+        # Initial checks
+        print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
+        use_sudo = False  # Windows doesn't use sudo
+        
+        if not check_docker():
+            sys.exit(1)
+        
+        if not check_docker_compose():
+            sys.exit(1)
+        
+        # Run complete rebuild process
+        if rebuild_application_from_scratch(use_sudo):
+            print_success("🔥 COMPLETE REBUILD COMPLETED SUCCESSFULLY!")
+        else:
+            print_error("❌ Complete rebuild failed!")
+            sys.exit(1)
         return
     
     # Check if should do quick update
@@ -927,6 +1056,35 @@ def main():
             print_success("🎉 FULL UPDATE COMPLETED SUCCESSFULLY!")
         else:
             print_error("❌ Full update failed!")
+            sys.exit(1)
+        return
+    
+    # Check if should do rebuild from scratch
+    if args.rebuild:
+        print_step("🔥 Starting COMPLETE REBUILD from scratch...")
+        print_colored("⚠️  WARNING: This will DELETE ALL DATA including database! ⚠️", Colors.WARNING)
+        
+        # Confirm the destructive operation
+        confirm = input("Type 'YES' to confirm destruction: ").strip().upper()
+        if confirm != 'YES':
+            print_warning("Rebuild aborted by user")
+            return
+        
+        # Initial checks
+        print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
+        use_sudo = False  # Windows doesn't use sudo
+        
+        if not check_docker():
+            sys.exit(1)
+        
+        if not check_docker_compose():
+            sys.exit(1)
+        
+        # Run rebuild from scratch
+        if rebuild_application_from_scratch(use_sudo):
+            print_success("🎉 COMPLETE REBUILD SUCCESSFUL!")
+        else:
+            print_error("❌ Rebuild failed!")
             sys.exit(1)
         return
     
@@ -991,6 +1149,7 @@ def main():
 ║  For quick update:        python run.py --quickupdate       ║  
 ║  For full update:         python run.py --update            ║
 ║  For upgrade:             python run.py --upgrade           ║
+║  For complete rebuild:    python run.py --rebuild           ║
 ║  To view logs:            python run.py --logs              ║
 ║  To follow logs:          python run.py --follow-logs       ║
 ║  To view status:          python run.py --status-only       ║
@@ -998,7 +1157,9 @@ def main():
 ║                                                              ║
 ║  ⚡ QUICK UPDATE: Fastest update with maximum cache         ║
 ║  🔄 FULL UPDATE: Complete rebuild for major changes        ║
-║  🛡️  Both preserve database and configuration files        ║
+║  🔥 REBUILD: Nuclear option - deletes EVERYTHING and       ║
+║      rebuilds from scratch (including database!)           ║
+║  🛡️  Updates preserve database and configs (except rebuild) ║
 ║                                                              ║
 ║  ⚠️  WARNING: Container running as ROOT to resolve          ║
 ║      file permission issues                                 ║
