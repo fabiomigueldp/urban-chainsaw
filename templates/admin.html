@@ -2058,9 +2058,6 @@
                     document.getElementById('finvizUrl').value = finvizData.finviz_url || '';
                     document.getElementById('topN').value = finvizData.top_n || 15;
                     document.getElementById('refreshInterval').value = finvizData.refresh_interval_sec || 10;
-                    // Load reprocess config from the same endpoint
-                    document.getElementById('reprocessEnabledSwitch').checked = finvizData.reprocess_enabled || false;
-                    document.getElementById('reprocessWindowInput').value = finvizData.reprocess_window_seconds || 300;
                 }
                 
                 // Load rate limiter config (from system status)
@@ -2119,8 +2116,6 @@
             const finvizUrl = document.getElementById('finvizUrl').value;
             const topN = document.getElementById('topN').value;
             const refreshInterval = document.getElementById('refreshInterval').value;
-            const reprocessEnabled = document.getElementById('reprocessEnabledSwitch').checked;
-            const reprocessWindowSeconds = document.getElementById('reprocessWindowInput').value;
             
             if (!finvizUrl) {
                 showAlert('Finviz URL is required', 'warning');
@@ -2135,18 +2130,15 @@
                         token: token,
                         finviz_url: finvizUrl,
                         top_n: parseInt(topN),
-                        refresh_interval_sec: parseInt(refreshInterval),
-                        reprocess_enabled: reprocessEnabled,
-                        reprocess_window_seconds: parseInt(reprocessWindowSeconds)
+                        refresh_interval_sec: parseInt(refreshInterval)
                     })
                 });
                 
                 if (response.ok) {
                     showAlert('Finviz configuration updated successfully!', 'success');
-                    // Update system status and reprocess switch to reflect changes
+                    // Update system status to reflect changes
                     setTimeout(() => {
                         loadSystemStatus();
-                        updateReprocessSwitch();
                     }, 1000);
                 } else {
                     const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
@@ -2190,10 +2182,9 @@
 
                 if (response.ok) {
                     showAlert('Reprocess configuration updated successfully!', 'success');
-                    // Update system status and reprocess switch to reflect changes
+                    // Update system status to reflect changes
                     setTimeout(() => {
                         loadSystemStatus();
-                        updateReprocessSwitch();
                     }, 1000);
                 } else {
                     const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
