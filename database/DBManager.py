@@ -682,7 +682,7 @@ class DBManager:
             filters.append(Signal.signal_id.cast(String).ilike(f"%{p.signal_id}%"))
         if p.status and p.status != 'all':
             # Now using strings directly
-            filters.append(Signal.status == p.status)
+            filters.append(Signal.status == p.status.lower()) # Convert to lowercase
         if p.signal_type and p.signal_type != 'all':
             # NEW: Filter by signal type
             filters.append(Signal.signal_type == p.signal_type)
