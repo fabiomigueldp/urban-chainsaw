@@ -439,39 +439,41 @@
                             </button>
                         </div>
                         <hr>
-                        <h5 class="card-title mt-4">
-                            <i class="bi bi-arrow-repeat"></i> Signal Reprocessing Engine
-                        </h5>
-                        <!-- 1. Indicador de Status Principal -->
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="mb-0">Status:</h6>
-                            <span id="reprocessingEngineStatus" class="badge bg-secondary fs-6">DISABLED</span>
-                        </div>
+                        <div id="reprocessingEngineContainer">
+                            <h5 class="card-title mt-4">
+                                <i class="bi bi-arrow-repeat"></i> Signal Reprocessing Engine
+                            </h5>
+                            <!-- 1. Indicador de Status Principal -->
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0">Status:</h6>
+                                <span id="reprocessingEngineStatus" class="badge bg-secondary fs-6">DISABLED</span>
+                            </div>
 
-                        <!-- 2. Controles Simplificados -->
-                        <div class="mb-3">
-                            <label for="reprocessingModeSelect" class="form-label">Operating Mode:</label>
-                            <select class="form-select" id="reprocessingModeSelect">
-                                <option value="disabled">Disabled</option>
-                                <option value="window">Time Window</option>
-                                <option value="infinite">Infinite Recovery</option>
-                            </select>
-                        </div>
+                            <!-- 2. Controles Simplificados -->
+                            <div class="mb-3">
+                                <label for="reprocessingModeSelect" class="form-label">Operating Mode:</label>
+                                <select class="form-select" id="reprocessingModeSelect">
+                                    <option value="disabled">Disabled</option>
+                                    <option value="window">Time Window</option>
+                                    <option value="infinite">Infinite Recovery</option>
+                                </select>
+                            </div>
 
-                        <!-- 3. Campo de Janela de Tempo (visível condicionalmente) -->
-                        <div id="reprocessingWindowContainer" class="mb-3" style="display: none;">
-                            <label for="reprocessingWindowInput" class="form-label">Lookback Window (seconds):</label>
-                            <input type="number" class="form-control" id="reprocessingWindowInput" value="300" min="1">
-                            <small class="form-text text-muted">
-                                How far back to look for rejected signals (e.g., 300s = 5 minutes).
-                            </small>
-                        </div>
+                            <!-- 3. Campo de Janela de Tempo (visível condicionalmente) -->
+                            <div id="reprocessingWindowContainer" class="mb-3" style="display: none;">
+                                <label for="reprocessingWindowInput" class="form-label">Lookback Window (seconds):</label>
+                                <input type="number" class="form-control" id="reprocessingWindowInput" value="300" min="1">
+                                <small class="form-text text-muted">
+                                    How far back to look for rejected signals (e.g., 300s = 5 minutes).
+                                </small>
+                            </div>
 
-                        <!-- 4. Botão de Ação Unificado -->
-                        <div class="d-grid">
-                            <button id="applyReprocessingConfigBtn" class="btn btn-primary">
-                                <i class="bi bi-check-circle"></i> Apply Configuration
-                            </button>
+                            <!-- 4. Botão de Ação Unificado -->
+                            <div class="d-grid">
+                                <button id="applyReprocessingConfigBtn" class="btn btn-primary">
+                                    <i class="bi bi-check-circle"></i> Apply Configuration
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -868,6 +870,7 @@
         let approvalChart = null;
         let currentPage = 1;
         let isLoading = false;
+        let isInteractingWithReprocessing = false;
         
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -1664,6 +1667,24 @@
             document.getElementById('reprocessingModeSelect').addEventListener('change', handleReprocessingModeChange);
             document.getElementById('applyReprocessingConfigBtn').addEventListener('click', applyReprocessingConfig);
             
+            // Add focus listeners to the reprocessing container
+            const reprocessingContainer = document.getElementById('reprocessingEngineContainer');
+            reprocessingContainer.addEventListener('focusin', () => {
+                isInteractingWithReprocessing = true;
+                console.log('User is interacting with reprocessing controls.');
+            });
+            
+            reprocessingContainer.addEventListener('focusout', (event) => {
+                // Use setTimeout to allow for focus to move between elements in the container
+                setTimeout(() => {
+                    if (!reprocessingContainer.contains(document.activeElement)) {
+                        isInteractingWithReprocessing = false;
+                        console.log('User has stopped interacting with reprocessing controls. Reloading state.');
+                        loadSystemStatus(); // Reload to revert any unsaved changes
+                    }
+                }, 100);
+            });
+            
             // Manual ticker input - add on Enter key
             document.getElementById('manualTickerInput').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
@@ -1714,6 +1735,7 @@
         }
 
         async function applyReprocessingConfig() {
+            isInteractingWithReprocessing = false; // Allow updates after applying config
             const mode = document.getElementById('reprocessingModeSelect').value;
             const windowSeconds = document.getElementById('reprocessingWindowInput').value;
 
@@ -1736,6 +1758,7 @@
                     token = prompt('Enter admin token:');
                     if (!token) {
                         showAlert('Token required to update reprocessing config', 'warning');
+                        isInteractingWithReprocessing = true; // Re-engage interaction lock
                         return;
                     }
                     localStorage.setItem('admin_token', token);
@@ -1765,7 +1788,10 @@
         }
 
         function updateReprocessingCard(systemInfo) {
-            if (!systemInfo) return;
+            if (!systemInfo || isInteractingWithReprocessing) {
+                if(isInteractingWithReprocessing) console.log("Skipping reprocessing card update due to user interaction.");
+                return;
+            }
 
             const statusBadge = document.getElementById('reprocessingEngineStatus');
             const modeSelect = document.getElementById('reprocessingModeSelect');
@@ -1773,6 +1799,7 @@
             const windowInput = document.getElementById('reprocessingWindowInput');
 
             const reprocessMode = systemInfo.reprocess_mode || 'Disabled';
+            const windowSeconds = systemInfo.reprocess_window_seconds;
 
             if (reprocessMode === 'Disabled') {
                 statusBadge.textContent = 'DISABLED';
@@ -1785,11 +1812,11 @@
                 modeSelect.value = 'infinite';
                 windowContainer.style.display = 'none';
             } else { // Time window
-                statusBadge.textContent = `ACTIVE (${systemInfo.reprocess_window_seconds}s Window)`;
+                statusBadge.textContent = `ACTIVE (${windowSeconds}s Window)`;
                 statusBadge.className = 'badge bg-success fs-6';
                 modeSelect.value = 'window';
                 windowContainer.style.display = 'block';
-                windowInput.value = systemInfo.reprocess_window_seconds || 300;
+                windowInput.value = windowSeconds || 300;
             }
         }
         

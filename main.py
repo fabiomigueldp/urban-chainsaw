@@ -635,6 +635,7 @@ async def get_system_info_data() -> Dict[str, Any]:
             reprocess_window = finviz_config.get("reprocess_window_seconds", 300)
             
             system_info["reprocess_enabled"] = reprocess_enabled
+            system_info["reprocess_window_seconds"] = reprocess_window # Add this line
             
             # Determine reprocess_mode for frontend
             if not reprocess_enabled:

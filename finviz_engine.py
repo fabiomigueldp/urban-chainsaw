@@ -52,6 +52,12 @@ class FinvizConfig(BaseModel):
             raise ValueError('refresh interval must be positive')
         return v
 
+    @validator('reprocess_window_seconds')
+    def reprocess_window_must_be_non_negative(cls, v):
+        if v < 0:
+            raise ValueError('reprocess_window_seconds cannot be negative')
+        return v
+
 class FinvizEngine:
     def __init__(self, shared_state: Dict[str, Any], admin_ws_broadcaster: callable):
         self.shared_state = shared_state
