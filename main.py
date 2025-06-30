@@ -325,13 +325,23 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
                         _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log forwarding queue to database: {db_error}")
                     
                     # Add to sell_all_accumulator if it's a buy signal
-                    if signal.side.lower() == 'buy':
+                    # Check signal.side exists and is a buy signal (default to buy if None)
+                    is_buy_signal = (signal.side is None or 
+                                   (signal.side is not None and signal.side.lower() in ['buy', 'long']))
+                    
+                    # Also check action field as backup (some signals use 'action' instead of 'side')
+                    if hasattr(signal, 'action') and signal.action is not None:
+                        is_buy_signal = is_buy_signal or signal.action.lower() in ['buy', 'long']
+                    
+                    if is_buy_signal:
                         shared_state['sell_all_accumulator'].add(normalised_ticker)
-                        _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Added {normalised_ticker} to sell_all_accumulator")
+                        _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Added {normalised_ticker} to sell_all_accumulator (side: {signal.side}, action: {getattr(signal, 'action', None)})")
                         
                         # Broadcast updated sell_all_accumulator
                         sell_all_data = await get_sell_all_list_data()
                         await comm_engine.trigger_sell_all_list_update(sell_all_data)
+                    else:
+                        _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Not adding {normalised_ticker} to sell_all_accumulator - not a buy signal (side: {signal.side}, action: {getattr(signal, 'action', None)})")
                     
                 else:
                     # Reject signal
