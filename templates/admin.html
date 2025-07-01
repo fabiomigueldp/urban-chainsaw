@@ -479,7 +479,7 @@
                 </div>
             </div>
             <div class="col-md-6">
-                <div class="card">
+                <div class="card mb-3">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
                             <i class="bi bi-gear-fill"></i> Configuration
@@ -495,134 +495,9 @@
                     </div>
                 </div>
             </div>
-
         </div>
         
-        <!-- Configuration Modal -->
-        <div class="modal fade" id="configModal" tabindex="-1" aria-labelledby="configModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="configModalLabel">
-                            <i class="bi bi-gear-fill"></i> System Configuration
-                        </h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="row">
-                            <!-- Webhook Configuration -->
-                            <div class="col-md-6 mb-3">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h6 class="mb-0"><i class="bi bi-send"></i> Target Webhook</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="mb-3">
-                                            <label for="webhookUrl" class="form-label">Webhook URL:</label>
-                                            <input type="url" id="webhookUrl" class="form-control" placeholder="https://webhook.example.com/endpoint">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label for="webhookTimeout" class="form-label">Timeout (seconds):</label>
-                                            <input type="number" id="webhookTimeout" class="form-control" value="5" min="1" max="60">
-                                        </div>
-                                        <button id="updateWebhookBtn" class="btn btn-primary btn-sm">
-                                            <i class="bi bi-check"></i> Update Webhook
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Finviz Configuration -->
-                            <div class="col-md-6 mb-3">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h6 class="mb-0"><i class="bi bi-graph-up"></i> Finviz Configuration</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="mb-3">
-                                            <label for="finvizUrl" class="form-label">Finviz URL:</label>
-                                            <input type="url" id="finvizUrl" class="form-control">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label for="topN" class="form-label">Top-N Tickers:</label>
-                                            <input type="number" id="topN" class="form-control" value="15" min="1" max="1000">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label for="refreshInterval" class="form-label">Refresh Interval (sec):</label>
-                                            <input type="number" id="refreshInterval" class="form-control" value="10" min="5" max="3600">
-                                        </div>
-                                        <button id="updateFinvizBtn" class="btn btn-primary btn-sm">
-                                            <i class="bi bi-check"></i> Update Finviz
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Rate Limiter Configuration -->
-                            <div class="col-md-6 mb-3">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h6 class="mb-0"><i class="bi bi-speedometer"></i> Rate Limiter</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="mb-3">
-                                            <label for="maxReqPerMin" class="form-label">Max Req/Min:</label>
-                                            <input type="number" id="maxReqPerMin" class="form-control" value="60" min="1" max="1000">
-                                        </div>
-                                        <div class="form-check mb-3">
-                                            <input class="form-check-input" type="checkbox" id="rateLimitingEnabled" checked>
-                                            <label class="form-check-label" for="rateLimitingEnabled">
-                                                Rate Limiting Enabled
-                                            </label>
-                                        </div>
-                                        <button id="updateRateLimiterBtn" class="btn btn-primary btn-sm">
-                                            <i class="bi bi-check"></i> Update Rate Limiter
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Token Configuration -->
-                            <div class="col-md-6 mb-3">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h6 class="mb-0"><i class="bi bi-key"></i> Administration Token</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="mb-3">
-                                            <label for="adminToken" class="form-label">Current Token:</label>
-                                            <div class="input-group">
-                                                <input type="password" id="adminToken" class="form-control" placeholder="Enter the token">
-                                                <button class="btn btn-outline-secondary" type="button" id="toggleTokenVisibility">
-                                                    <i class="bi bi-eye"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div class="alert alert-info small">
-                                            <i class="bi bi-info-circle"></i> Token will be saved in browser for automatic use
-                                        </div>
-                                        <button id="saveTokenBtn" class="btn btn-success btn-sm">
-                                            <i class="bi bi-save"></i> Save Token
-                                        </button>
-                                        <button id="clearTokenBtn" class="btn btn-outline-danger btn-sm">
-                                            <i class="bi bi-trash"></i> Clear Token
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        <button type="button" class="btn btn-primary" id="loadCurrentConfigBtn">
-                            <i class="bi bi-arrow-clockwise"></i> Load Current Configuration
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Top-N Tickers List -->
+        <!-- Top-N Tickers List and Sell All Management -->
         <div class="row mb-4">
             <div class="col-md-6">
                 <div class="card">
@@ -696,6 +571,23 @@
                             </div>
                         </div>
                         
+                        <!-- Cleanup Settings -->
+                        <div class="mb-3">
+                            <h6>Cleanup Settings:</h6>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" role="switch" id="cleanupEnabledSwitch">
+                                <label class="form-check-label" for="cleanupEnabledSwitch">Enable Automatic Cleanup</label>
+                            </div>
+                            <div class="mb-2">
+                                <label for="lifetimeHoursInput" class="form-label">Ticker Lifetime (hours)</label>
+                                <input type="number" id="lifetimeHoursInput" class="form-control" min="1">
+                                <small class="form-text text-muted">A ticker will be removed from the list after this many hours.</small>
+                            </div>
+                            <button id="saveCleanupConfigBtn" class="btn btn-outline-primary btn-sm w-100">
+                                <i class="bi bi-save"></i> Save Cleanup Settings
+                            </button>
+                        </div>
+
                         <div class="d-grid gap-2">
                             <button id="executeSellAllBtn" class="btn btn-danger">
                                 <i class="bi bi-exclamation-triangle"></i> Execute Sell All
@@ -710,30 +602,6 @@
                                 </button>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-            <!-- Add this new card inside the main container, e.g., in a new row -->
-            <div class="col-md-6"> <!-- Adjusted to fit with the Sell All Management card -->
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">
-                            <i class="bi bi-recycle"></i> Sell All List Cleanup
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" role="switch" id="cleanupEnabledSwitch">
-                            <label class="form-check-label" for="cleanupEnabledSwitch">Enable Automatic Cleanup</label>
-                        </div>
-                        <div class="mb-3">
-                            <label for="lifetimeHoursInput" class="form-label">Ticker Lifetime (hours)</label>
-                            <input type="number" id="lifetimeHoursInput" class="form-control" min="1">
-                            <small class="form-text text-muted">A ticker will be removed from the list after this many hours.</small>
-                        </div>
-                        <button id="saveCleanupConfigBtn" class="btn btn-primary w-100">
-                            <i class="bi bi-save"></i> Save Cleanup Settings
-                        </button>
                     </div>
                 </div>
             </div>
