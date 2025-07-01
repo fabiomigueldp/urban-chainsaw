@@ -219,6 +219,16 @@ class Settings(BaseSettings):
         description="Time window in seconds to look back for rejected signals to reprocess."
     )
 
+    # --- New settings for Sell All List Cleanup ---
+    SELL_ALL_LIST_CLEANUP_ENABLED: bool = Field(
+        True,
+        description="Enable automatic cleanup of the Sell All list."
+    )
+    SELL_ALL_LIST_TICKER_LIFETIME_HOURS: int = Field(
+        72,
+        description="Ticker lifetime in hours for the Sell All list."
+    )
+
     class Config:
         env_file = ".env"
         case_sensitive = True

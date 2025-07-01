@@ -200,7 +200,7 @@ shared_state: Dict[str, Any] = {
     "finviz_engine_instance": None, # To hold the FinvizEngine instance
     "webhook_rate_limiter_instance": None, # To hold the WebhookRateLimiter instance
     "signal_metrics": signal_metrics,
-    "sell_all_accumulator": set(),
+    "sell_all_accumulator": {}, # Will store {ticker: added_timestamp}
     "signal_trackers": {},  # Initialize signal trackers dictionary
 }
 
@@ -334,7 +334,8 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
                         is_buy_signal = is_buy_signal or signal.action.lower() in ['buy', 'long']
                     
                     if is_buy_signal:
-                        shared_state['sell_all_accumulator'].add(normalised_ticker)
+                        # shared_state['sell_all_accumulator'].add(normalised_ticker) # Old way
+                        shared_state['sell_all_accumulator'][normalised_ticker] = time.time() # New way
                         _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Added {normalised_ticker} to sell_all_accumulator (side: {signal.side}, action: {getattr(signal, 'action', None)})")
                         
                         # Broadcast updated sell_all_accumulator
@@ -544,6 +545,44 @@ async def _forwarding_worker(worker_id: int) -> None:
             _logger.error(f"Forwarding worker {worker_id} error: {type(e).__name__}: {str(e)}")
             _logger.error(f"Forwarding worker {worker_id} full exception:", exc_info=True)
             await asyncio.sleep(1)  # Brief pause before continuing
+
+async def _sell_all_list_cleanup_worker():
+    """Periodically cleans expired tickers from the Sell All list."""
+    _logger.info("🧹 Sell All List cleanup worker started.")
+    while True:
+        await asyncio.sleep(60) # Check every 60 seconds
+
+        try:
+            if not settings.SELL_ALL_LIST_CLEANUP_ENABLED:
+                continue # Skip if the feature is disabled
+
+            now = time.time()
+            lifetime_seconds = settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS * 3600
+            accumulator = shared_state['sell_all_accumulator']
+
+            # It's crucial to iterate over a copy of the keys to modify the dict during iteration
+            tickers_to_remove = [
+                ticker for ticker, added_at in accumulator.items()
+                if (now - added_at) > lifetime_seconds
+            ]
+
+            if tickers_to_remove:
+                removed_count = 0
+                for ticker in tickers_to_remove:
+                    if ticker in accumulator: # Check if ticker still exists before deleting
+                        del accumulator[ticker]
+                        removed_count += 1
+
+                if removed_count > 0: # Only log and broadcast if something was actually removed
+                    _logger.info(f"🧹 Sell All Cleanup: Removed {removed_count} expired ticker(s): {tickers_to_remove}")
+
+                    # Broadcast the updated list to all admin clients
+                    updated_list_data = await get_sell_all_list_data() # Ensure this function is available
+                    await comm_engine.trigger_sell_all_list_update(updated_list_data)
+
+        except Exception as e:
+            _logger.error(f"Error in Sell All List cleanup worker: {e}", exc_info=True)
+
 
 # ---------------------------------------------------------------------------- #
 # FastAPI application                                                          #
@@ -881,7 +920,8 @@ async def get_auth_status_data() -> Dict[str, Any]:
 async def get_sell_all_list_data() -> List[str]:
     """Get current sell all list data for comm_engine."""
     try:
-        sell_all_data = sorted(list(shared_state.get('sell_all_accumulator', [])))
+        # sell_all_data = sorted(list(shared_state.get('sell_all_accumulator', []))) # Old way
+        sell_all_data = sorted(list(shared_state.get('sell_all_accumulator', {}).keys())) # New way
         return sell_all_data
     except Exception as e:
         _logger.error(f"Error getting sell all list data: {e}")
@@ -1011,6 +1051,10 @@ async def _startup() -> None:
     
     asyncio.create_task(admin_updates_task())
     _logger.info("Admin WebSocket updates task started")
+
+    # Start the Sell All list cleanup worker
+    asyncio.create_task(_sell_all_list_cleanup_worker())
+    _logger.info("Sell All List cleanup worker task scheduled.")
 
 
 @app.on_event("shutdown")
@@ -1558,9 +1602,10 @@ async def sell_individual_order(payload: SellIndividualPayload):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
 
     _logger.info(f"Received /admin/order/sell-individual request for ticker: {payload.ticker}")
+    normalised_ticker = payload.ticker.strip().upper() # Normalize ticker
 
     # Create Signal object
-    signal_to_queue = Signal(ticker=payload.ticker, side='sell') # Using side='sell'
+    signal_to_queue = Signal(ticker=normalised_ticker, side='sell') # Using side='sell'
 
     # Create signal in database with correct type
     from database.simple_models import SignalTypeEnum
@@ -1586,15 +1631,20 @@ async def sell_individual_order(payload: SellIndividualPayload):
     try:
         # Add to approved_signal_queue
         await approved_signal_queue.put(approved_signal_data)
-        _logger.info(f"Sell signal for {payload.ticker} added to approved_signal_queue.")
+        _logger.info(f"Sell signal for {normalised_ticker} added to approved_signal_queue.")
         
         # Update shared_state['sell_all_accumulator'] - this ticker was sold individually
-        shared_state['sell_all_accumulator'].add(payload.ticker.strip().upper())
+        # shared_state['sell_all_accumulator'].add(normalised_ticker) # Old way
+        shared_state['sell_all_accumulator'][normalised_ticker] = time.time() # New way, mark as "recent"
         
-        return {"message": f"Sell signal for {payload.ticker} queued successfully", "signal_id": signal_to_queue.signal_id}
+        # Broadcast updated sell_all_accumulator
+        sell_all_data = await get_sell_all_list_data()
+        await comm_engine.trigger_sell_all_list_update(sell_all_data)
+
+        return {"message": f"Sell signal for {normalised_ticker} queued successfully", "signal_id": signal_to_queue.signal_id}
         
     except Exception as e:
-        _logger.error(f"Error queueing sell signal for {payload.ticker}: {e}")
+        _logger.error(f"Error queueing sell signal for {normalised_ticker}: {e}")
         raise HTTPException(status_code=500, detail=f"Error queueing sell signal: {str(e)}")
 
 @app.post("/admin/order/sell-all", status_code=status.HTTP_200_OK)
@@ -1606,7 +1656,7 @@ async def sell_all_orders(payload: TokenPayload):
             _logger.warning("Invalid token received for /admin/order/sell-all.")
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
 
-        tickers_to_sell = list(shared_state.get('sell_all_accumulator', []))
+        tickers_to_sell = list(shared_state.get('sell_all_accumulator', {}).keys()) # Get keys from dict
         
         if not tickers_to_sell:
             return {"message": "No tickers to sell", "tickers_processed": []}
@@ -1948,7 +1998,8 @@ async def resume_webhook_rate_limiter(payload: dict = Body(...)):
 async def get_sell_all_queue():
     """Get the current sell-all accumulator list."""
     try:
-        tickers_list = list(shared_state.get('sell_all_accumulator', set()))
+        # tickers_list = list(shared_state.get('sell_all_accumulator', set())) # Old way
+        tickers_list = list(shared_state.get('sell_all_accumulator', {}).keys()) # New way
         tickers_list.sort()  # Sort alphabetically for consistent display
         
         return {
@@ -1979,7 +2030,8 @@ async def queue_to_sell_all(payload: dict = Body(...)):
     try:
         # Add to sell_all_accumulator
         normalised_ticker = ticker.strip().upper()
-        shared_state['sell_all_accumulator'].add(normalised_ticker)
+        # shared_state['sell_all_accumulator'].add(normalised_ticker) # Old way
+        shared_state['sell_all_accumulator'][normalised_ticker] = time.time() # New way
         
         _logger.info(f"Ticker {normalised_ticker} added to sell-all accumulator via admin")
         
@@ -2149,6 +2201,64 @@ async def get_finviz_config():
     except Exception as e:
         _logger.error(f"Error getting finviz config: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving finviz config")
+
+# --- Sell All List Management API Endpoints ---
+
+@app.post("/admin/sell-all-queue/clear", status_code=status.HTTP_200_OK)
+async def clear_sell_all_list(payload: TokenPayload):
+    """Clears all tickers from the sell_all_accumulator."""
+    if payload.token != FINVIZ_UPDATE_TOKEN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+
+    try:
+        accumulator = shared_state.get('sell_all_accumulator', {})
+        count = len(accumulator)
+        accumulator.clear()
+        _logger.info(f"Sell All list cleared manually. Removed {count} tickers.")
+
+        # Broadcast the empty list to all admin clients
+        await comm_engine.trigger_sell_all_list_update([]) # Send empty list
+
+        return {"message": f"Successfully cleared {count} tickers from the Sell All list."}
+    except Exception as e:
+        _logger.error(f"Error clearing sell-all list: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/admin/sell-all/config", status_code=status.HTTP_204_NO_CONTENT)
+async def update_sell_all_config(payload: dict = Body(...)):
+    """Updates the Sell All list cleanup configuration."""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+
+    try:
+        if 'enabled' in payload:
+            settings.SELL_ALL_LIST_CLEANUP_ENABLED = bool(payload['enabled'])
+            _logger.info(f"Sell All cleanup enabled status set to: {settings.SELL_ALL_LIST_CLEANUP_ENABLED}")
+
+        if 'lifetime_hours' in payload:
+            lifetime = int(payload['lifetime_hours'])
+            if lifetime <= 0:
+                raise ValueError("Lifetime must be a positive number of hours.")
+            settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS = lifetime
+            _logger.info(f"Sell All ticker lifetime set to: {settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS} hours")
+
+    except (ValueError, TypeError) as e:
+        _logger.error(f"Invalid value for sell-all config: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        _logger.error(f"Error updating sell-all config: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/admin/sell-all/config")
+async def get_sell_all_config():
+    """Gets the current Sell All list cleanup configuration."""
+    return {
+        "enabled": settings.SELL_ALL_LIST_CLEANUP_ENABLED,
+        "lifetime_hours": settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS
+    }
+
+# --- End Sell All List Management API Endpoints ---
 
 @app.post("/admin/system/config", status_code=status.HTTP_204_NO_CONTENT)
 async def update_system_config(payload: dict = Body(...)):
