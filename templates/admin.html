@@ -572,8 +572,11 @@
                         </div>
                         
                         <!-- Cleanup Settings -->
-                        <div class="mb-3">
-                            <h6>Cleanup Settings:</h6>
+                        <div id="sellAllCleanupContainer" class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0">Cleanup Settings:</h6>
+                                <span id="sellAllCleanupStatus" class="badge bg-secondary fs-6">UNKNOWN</span>
+                            </div>
                             <div class="form-check form-switch mb-2">
                                 <input class="form-check-input" type="checkbox" role="switch" id="cleanupEnabledSwitch">
                                 <label class="form-check-label" for="cleanupEnabledSwitch">Enable Automatic Cleanup</label>
@@ -769,6 +772,7 @@
         let currentPage = 1;
         let isLoading = false;
         let isInteractingWithReprocessing = false;
+        let isInteractingWithCleanup = false;
         
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -836,6 +840,8 @@
                         }
                         // Update reprocess switch to keep it synchronized
                         updateReprocessingCard(data.data.system_info);
+                        // Update cleanup card to keep it synchronized
+                        updateCleanupCard(data.data.system_info);
                         break;
                     case 'sell_all_list_update':
                         updateSellAllList(data.data);
@@ -956,6 +962,9 @@
                 
                 // Load audit trail
                 await loadAuditTrail();
+                
+                // Load cleanup configuration
+                await loadCleanupConfig();
                 
             } catch (error) {
                 console.error('Error loading initial data:', error);
@@ -1565,6 +1574,9 @@
             document.getElementById('reprocessingModeSelect').addEventListener('change', handleReprocessingModeChange);
             document.getElementById('applyReprocessingConfigBtn').addEventListener('click', applyReprocessingConfig);
             
+            // Cleanup card controls
+            document.getElementById('saveCleanupConfigBtn').addEventListener('click', saveCleanupConfig);
+            
             // Add focus listeners to the reprocessing container
             const reprocessingContainer = document.getElementById('reprocessingEngineContainer');
             reprocessingContainer.addEventListener('focusin', () => {
@@ -1578,6 +1590,24 @@
                     if (!reprocessingContainer.contains(document.activeElement)) {
                         isInteractingWithReprocessing = false;
                         console.log('User has stopped interacting with reprocessing controls. Reloading state.');
+                        loadSystemStatus(); // Reload to revert any unsaved changes
+                    }
+                }, 100);
+            });
+            
+            // Add focus listeners to the cleanup container
+            const cleanupContainer = document.getElementById('sellAllCleanupContainer');
+            cleanupContainer.addEventListener('focusin', () => {
+                isInteractingWithCleanup = true;
+                console.log('User is interacting with cleanup controls.');
+            });
+            
+            cleanupContainer.addEventListener('focusout', (event) => {
+                // Use setTimeout to allow for focus to move between elements in the container
+                setTimeout(() => {
+                    if (!cleanupContainer.contains(document.activeElement)) {
+                        isInteractingWithCleanup = false;
+                        console.log('User has stopped interacting with cleanup controls. Reloading state.');
                         loadSystemStatus(); // Reload to revert any unsaved changes
                     }
                 }, 100);
@@ -1716,6 +1746,31 @@
                 windowContainer.style.display = 'block';
                 windowInput.value = windowSeconds || 300;
             }
+        }
+        
+        function updateCleanupCard(systemInfo) {
+            if (!systemInfo || isInteractingWithCleanup) {
+                if(isInteractingWithCleanup) console.log("Skipping cleanup card update due to user interaction.");
+                return;
+            }
+
+            const statusBadge = document.getElementById('sellAllCleanupStatus');
+            const enabledSwitch = document.getElementById('cleanupEnabledSwitch');
+            const lifetimeInput = document.getElementById('lifetimeHoursInput');
+
+            const enabled = systemInfo.sell_all_cleanup_enabled !== undefined ? systemInfo.sell_all_cleanup_enabled : true;
+            const lifetime = systemInfo.sell_all_cleanup_lifetime_hours !== undefined ? systemInfo.sell_all_cleanup_lifetime_hours : 72;
+
+            if (enabled) {
+                statusBadge.textContent = `ACTIVE (${lifetime}h Lifetime)`;
+                statusBadge.className = 'badge bg-success fs-6';
+            } else {
+                statusBadge.textContent = 'DISABLED';
+                statusBadge.className = 'badge bg-secondary fs-6';
+            }
+
+            if (enabledSwitch) enabledSwitch.checked = enabled;
+            if (lifetimeInput) lifetimeInput.value = lifetime;
         }
         
         // Send control command
@@ -2479,9 +2534,6 @@
         document.addEventListener('DOMContentLoaded', function() {
             initializeConfigPanel();
 
-            // Load cleanup config on page load
-            loadCleanupConfig(); // Moved here to be within the main DOMContentLoaded
-
             // Bind Sell All List Cleanup buttons
             const clearBtn = document.getElementById('clearSellAllBtn');
             if (clearBtn) {
@@ -2533,21 +2585,39 @@
                 const enabledSwitch = document.getElementById('cleanupEnabledSwitch');
                 const lifetimeInput = document.getElementById('lifetimeHoursInput');
 
-                if(enabledSwitch) enabledSwitch.checked = data.enabled;
-                else console.error("cleanupEnabledSwitch not found during load");
+                if(enabledSwitch) {
+                    enabledSwitch.checked = data.enabled !== undefined ? data.enabled : true;
+                } else {
+                    console.error("cleanupEnabledSwitch not found during load");
+                }
 
-                if(lifetimeInput) lifetimeInput.value = data.lifetime_hours;
-                else console.error("lifetimeHoursInput not found during load");
+                if(lifetimeInput) {
+                    lifetimeInput.value = data.lifetime_hours !== undefined ? data.lifetime_hours : 72;
+                } else {
+                    console.error("lifetimeHoursInput not found during load");
+                }
 
             } catch (error) {
                 console.error('Error loading cleanup config:', error);
                 showAlert('Could not load Sell All cleanup settings.', 'warning');
+                
+                // Set defaults if loading failed
+                const enabledSwitch = document.getElementById('cleanupEnabledSwitch');
+                const lifetimeInput = document.getElementById('lifetimeHoursInput');
+                
+                if(enabledSwitch) enabledSwitch.checked = true;
+                if(lifetimeInput) lifetimeInput.value = 72;
             }
         }
 
         async function saveCleanupConfig() {
+            isInteractingWithCleanup = false; // Allow updates after applying config
+            
             const token = getAdminToken();
-            if (!token) return;
+            if (!token) {
+                isInteractingWithCleanup = true; // Re-engage interaction lock
+                return;
+            }
 
             const enabledSwitch = document.getElementById('cleanupEnabledSwitch');
             const lifetimeInput = document.getElementById('lifetimeHoursInput');
@@ -2555,6 +2625,7 @@
             if (!enabledSwitch || !lifetimeInput) {
                 showAlert('Cleanup config UI elements not found. Cannot save.', 'danger');
                 console.error("Cleanup config UI elements not found for saving.");
+                isInteractingWithCleanup = true; // Re-engage interaction lock
                 return;
             }
 
@@ -2564,6 +2635,7 @@
 
             if (isNaN(lifetime_hours) || lifetime_hours <= 0) {
                 showAlert('Ticker lifetime must be a positive number of hours.', 'warning');
+                isInteractingWithCleanup = true; // Re-engage interaction lock
                 return;
             }
 
@@ -2580,15 +2652,19 @@
 
                 if (response.status === 204) {
                     showAlert('Cleanup settings saved successfully!', 'success');
+                    loadSystemStatus(); // Refresh system status to reflect changes
                 } else if (response.ok) {
                      showAlert('Cleanup settings saved successfully! (Status: ' + response.status + ')', 'success');
+                     loadSystemStatus(); // Refresh system status to reflect changes
                 } else {
                     // Try to parse error detail, otherwise show generic error
                     const errorData = await response.json().catch(() => ({ detail: `Failed to save settings (HTTP ${response.status})` }));
                     throw new Error(errorData.detail);
                 }
             } catch (error) {
+                console.error('Error saving cleanup config:', error);
                 showAlert(`Error saving settings: ${error.message}`, 'danger');
+                isInteractingWithCleanup = true; // Re-engage interaction lock
             }
         }
         // --- End Sell All List Cleanup Functions ---

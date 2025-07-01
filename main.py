@@ -553,11 +553,15 @@ async def _sell_all_list_cleanup_worker():
         await asyncio.sleep(60) # Check every 60 seconds
 
         try:
-            if not settings.SELL_ALL_LIST_CLEANUP_ENABLED:
+            # Load current configuration from system_config.json
+            from system_config import get_sell_all_cleanup_config
+            cleanup_config = get_sell_all_cleanup_config()
+            
+            if not cleanup_config["enabled"]:
                 continue # Skip if the feature is disabled
 
             now = time.time()
-            lifetime_seconds = settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS * 3600
+            lifetime_seconds = cleanup_config["lifetime_hours"] * 3600
             accumulator = shared_state['sell_all_accumulator']
 
             # It's crucial to iterate over a copy of the keys to modify the dict during iteration
@@ -698,6 +702,17 @@ async def get_system_info_data() -> Dict[str, Any]:
             _logger.warning(f"Could not load finviz config for reprocess status: {e}")
             system_info["reprocess_enabled"] = False
             system_info["reprocess_mode"] = "Unknown"
+        
+        # Get sell all cleanup status from system config
+        try:
+            from system_config import get_sell_all_cleanup_config
+            cleanup_config = get_sell_all_cleanup_config()
+            system_info["sell_all_cleanup_enabled"] = cleanup_config["enabled"]
+            system_info["sell_all_cleanup_lifetime_hours"] = cleanup_config["lifetime_hours"]
+        except Exception as e:
+            _logger.warning(f"Could not load system config for sell all cleanup status: {e}")
+            system_info["sell_all_cleanup_enabled"] = False
+            system_info["sell_all_cleanup_lifetime_hours"] = 0
         
         return system_info
         
@@ -2232,16 +2247,35 @@ async def update_sell_all_config(payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
 
     try:
-        if 'enabled' in payload:
-            settings.SELL_ALL_LIST_CLEANUP_ENABLED = bool(payload['enabled'])
-            _logger.info(f"Sell All cleanup enabled status set to: {settings.SELL_ALL_LIST_CLEANUP_ENABLED}")
-
-        if 'lifetime_hours' in payload:
-            lifetime = int(payload['lifetime_hours'])
-            if lifetime <= 0:
+        from system_config import update_sell_all_cleanup_config
+        
+        # Extract configuration values
+        enabled = payload.get('enabled')
+        lifetime_hours = payload.get('lifetime_hours')
+        
+        # Validate inputs
+        if enabled is not None:
+            enabled = bool(enabled)
+        else:
+            # Keep current enabled state if not provided
+            from system_config import get_sell_all_cleanup_config
+            current_config = get_sell_all_cleanup_config()
+            enabled = current_config["enabled"]
+            
+        if lifetime_hours is not None:
+            lifetime_hours = int(lifetime_hours)
+            if lifetime_hours <= 0:
                 raise ValueError("Lifetime must be a positive number of hours.")
-            settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS = lifetime
-            _logger.info(f"Sell All ticker lifetime set to: {settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS} hours")
+        else:
+            # Keep current lifetime if not provided
+            from system_config import get_sell_all_cleanup_config
+            current_config = get_sell_all_cleanup_config()
+            lifetime_hours = current_config["lifetime_hours"]
+        
+        # Update configuration in persistent storage
+        update_sell_all_cleanup_config(enabled, lifetime_hours)
+        
+        _logger.info(f"Sell All cleanup config updated: enabled={enabled}, lifetime_hours={lifetime_hours}")
 
     except (ValueError, TypeError) as e:
         _logger.error(f"Invalid value for sell-all config: {e}")
@@ -2253,10 +2287,13 @@ async def update_sell_all_config(payload: dict = Body(...)):
 @app.get("/admin/sell-all/config")
 async def get_sell_all_config():
     """Gets the current Sell All list cleanup configuration."""
-    return {
-        "enabled": settings.SELL_ALL_LIST_CLEANUP_ENABLED,
-        "lifetime_hours": settings.SELL_ALL_LIST_TICKER_LIFETIME_HOURS
-    }
+    try:
+        from system_config import get_sell_all_cleanup_config
+        config = get_sell_all_cleanup_config()
+        return config
+    except Exception as e:
+        _logger.error(f"Error getting sell-all config: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # --- End Sell All List Management API Endpoints ---
 
