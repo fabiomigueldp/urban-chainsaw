@@ -700,17 +700,47 @@
                             <button id="executeSellAllBtn" class="btn btn-danger">
                                 <i class="bi bi-exclamation-triangle"></i> Execute Sell All
                             </button>
-                            <button id="refreshSellAllBtn" class="btn btn-outline-secondary">
-                                <i class="bi bi-arrow-clockwise"></i> Refresh List
-                            </button>
+                            <!-- ADD THIS NEW ROW FOR CLEAR AND REFRESH -->
+                            <div class="btn-group">
+                                 <button id="clearSellAllBtn" class="btn btn-outline-warning w-50">
+                                    <i class="bi bi-trash"></i> Clear List Now
+                                </button>
+                                <button id="refreshSellAllBtn" class="btn btn-outline-secondary w-50">
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh List
+                                </button>
+                            </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Add this new card inside the main container, e.g., in a new row -->
+            <div class="col-md-6"> <!-- Adjusted to fit with the Sell All Management card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-recycle"></i> Sell All List Cleanup
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" role="switch" id="cleanupEnabledSwitch">
+                            <label class="form-check-label" for="cleanupEnabledSwitch">Enable Automatic Cleanup</label>
+                        </div>
+                        <div class="mb-3">
+                            <label for="lifetimeHoursInput" class="form-label">Ticker Lifetime (hours)</label>
+                            <input type="number" id="lifetimeHoursInput" class="form-control" min="1">
+                            <small class="form-text text-muted">A ticker will be removed from the list after this many hours.</small>
+                        </div>
+                        <button id="saveCleanupConfigBtn" class="btn btn-primary w-100">
+                            <i class="bi bi-save"></i> Save Cleanup Settings
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
         
         <!-- Audit Trail -->
-        <div class="row">
+        <div class="row mt-4"> <!-- Added mt-4 for spacing -->
             <div class="col-12">
                 <div class="card">
                     <div class="card-header">
@@ -2580,7 +2610,121 @@
         // Initialize configuration panel when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             initializeConfigPanel();
+
+            // Load cleanup config on page load
+            loadCleanupConfig(); // Moved here to be within the main DOMContentLoaded
+
+            // Bind Sell All List Cleanup buttons
+            const clearBtn = document.getElementById('clearSellAllBtn');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', clearSellAllList);
+            } else {
+                console.error("clearSellAllBtn not found");
+            }
+
+            const saveCleanupBtn = document.getElementById('saveCleanupConfigBtn');
+            if (saveCleanupBtn) {
+                saveCleanupBtn.addEventListener('click', saveCleanupConfig);
+            } else {
+                console.error("saveCleanupConfigBtn not found");
+            }
         });
+
+        // --- Sell All List Cleanup Functions ---
+        async function clearSellAllList() {
+            if (!confirm('Are you sure you want to clear the entire Sell All list? This action cannot be undone.')) {
+                return;
+            }
+            const token = getAdminToken(); // Use existing getAdminToken function
+            if (!token) return;
+
+            try {
+                const response = await fetch('/admin/sell-all-queue/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                });
+                const data = await response.json(); // Assuming server sends JSON response
+                if (response.ok) {
+                    showAlert(data.message || 'Sell All list cleared successfully.', 'success');
+                    // UI update will be handled by WebSocket message 'sell_all_list_update'
+                } else {
+                    throw new Error(data.detail || 'Failed to clear list');
+                }
+            } catch (error) {
+                showAlert(`Error clearing list: ${error.message}`, 'danger');
+            }
+        }
+
+        async function loadCleanupConfig() {
+            try {
+                const response = await fetch('/admin/sell-all/config');
+                if (!response.ok) throw new Error('Failed to fetch cleanup config');
+                const data = await response.json();
+
+                const enabledSwitch = document.getElementById('cleanupEnabledSwitch');
+                const lifetimeInput = document.getElementById('lifetimeHoursInput');
+
+                if(enabledSwitch) enabledSwitch.checked = data.enabled;
+                else console.error("cleanupEnabledSwitch not found during load");
+
+                if(lifetimeInput) lifetimeInput.value = data.lifetime_hours;
+                else console.error("lifetimeHoursInput not found during load");
+
+            } catch (error) {
+                console.error('Error loading cleanup config:', error);
+                showAlert('Could not load Sell All cleanup settings.', 'warning');
+            }
+        }
+
+        async function saveCleanupConfig() {
+            const token = getAdminToken();
+            if (!token) return;
+
+            const enabledSwitch = document.getElementById('cleanupEnabledSwitch');
+            const lifetimeInput = document.getElementById('lifetimeHoursInput');
+
+            if (!enabledSwitch || !lifetimeInput) {
+                showAlert('Cleanup config UI elements not found. Cannot save.', 'danger');
+                console.error("Cleanup config UI elements not found for saving.");
+                return;
+            }
+
+            const enabled = enabledSwitch.checked;
+            const lifetime_hours_str = lifetimeInput.value;
+            const lifetime_hours = parseInt(lifetime_hours_str);
+
+            if (isNaN(lifetime_hours) || lifetime_hours <= 0) {
+                showAlert('Ticker lifetime must be a positive number of hours.', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/sell-all/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: token,
+                        enabled: enabled,
+                        lifetime_hours: lifetime_hours
+                    })
+                });
+
+                if (response.status === 204) {
+                    showAlert('Cleanup settings saved successfully!', 'success');
+                } else if (response.ok) {
+                     showAlert('Cleanup settings saved successfully! (Status: ' + response.status + ')', 'success');
+                } else {
+                    // Try to parse error detail, otherwise show generic error
+                    const errorData = await response.json().catch(() => ({ detail: `Failed to save settings (HTTP ${response.status})` }));
+                    throw new Error(errorData.detail);
+                }
+            } catch (error) {
+                showAlert(`Error saving settings: ${error.message}`, 'danger');
+            }
+        }
+        // --- End Sell All List Cleanup Functions ---
+
     </script>
 </body>
 </html>
