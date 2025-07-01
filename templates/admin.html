@@ -2261,27 +2261,66 @@
         
         // Configuration Panel Functions
         function initializeConfigPanel() {
-            // Bind configuration modal events
-            document.getElementById('openConfigBtn').addEventListener('click', openConfigModal);
-            document.getElementById('setTokenBtn').addEventListener('click', setAdminToken);
-            document.getElementById('loadCurrentConfigBtn').addEventListener('click', loadCurrentConfig);
+            // Bind configuration modal events (only if elements exist)
+            const openConfigBtn = document.getElementById('openConfigBtn');
+            if (openConfigBtn) {
+                openConfigBtn.addEventListener('click', openConfigModal);
+            }
             
-            // Bind configuration update buttons
-            document.getElementById('updateWebhookBtn').addEventListener('click', updateWebhookConfig);
-            document.getElementById('updateFinvizBtn').addEventListener('click', updateFinvizConfig);
-            document.getElementById('updateRateLimiterBtn').addEventListener('click', updateRateLimiterConfig);
+            const setTokenBtn = document.getElementById('setTokenBtn');
+            if (setTokenBtn) {
+                setTokenBtn.addEventListener('click', setAdminToken);
+            }
             
-            // Token management
-            document.getElementById('saveTokenBtn').addEventListener('click', saveAdminToken);
-            document.getElementById('clearTokenBtn').addEventListener('click', clearAdminToken);
-            document.getElementById('toggleTokenVisibility').addEventListener('click', toggleTokenVisibility);
+            // Guard against non-existent elements to prevent JS errors
+            const loadCurrentConfigBtn = document.getElementById('loadCurrentConfigBtn');
+            if (loadCurrentConfigBtn) {
+                loadCurrentConfigBtn.addEventListener('click', loadCurrentConfig);
+            }
+            
+            const updateWebhookBtn = document.getElementById('updateWebhookBtn');
+            if (updateWebhookBtn) {
+                updateWebhookBtn.addEventListener('click', updateWebhookConfig);
+            }
+            
+            const updateFinvizBtn = document.getElementById('updateFinvizBtn');
+            if (updateFinvizBtn) {
+                updateFinvizBtn.addEventListener('click', updateFinvizConfig);
+            }
+            
+            const updateRateLimiterBtn = document.getElementById('updateRateLimiterBtn');
+            if (updateRateLimiterBtn) {
+                updateRateLimiterBtn.addEventListener('click', updateRateLimiterConfig);
+            }
+            
+            const saveTokenBtn = document.getElementById('saveTokenBtn');
+            if (saveTokenBtn) {
+                saveTokenBtn.addEventListener('click', saveAdminToken);
+            }
+            
+            const clearTokenBtn = document.getElementById('clearTokenBtn');
+            if (clearTokenBtn) {
+                clearTokenBtn.addEventListener('click', clearAdminToken);
+            }
+            
+            const toggleTokenVisibility = document.getElementById('toggleTokenVisibility');
+            if (toggleTokenVisibility) {
+                toggleTokenVisibility.addEventListener('click', toggleTokenVisibilityHandler);
+            }
             
             // Load saved token if available
             loadSavedToken();
         }
         
         function openConfigModal() {
-            const modal = new bootstrap.Modal(document.getElementById('configModal'));
+            const configModal = document.getElementById('configModal');
+            if (!configModal) {
+                console.warn('Configuration modal not found in DOM');
+                showAlert('Configuration modal not available', 'warning');
+                return;
+            }
+            
+            const modal = new bootstrap.Modal(configModal);
             modal.show();
             loadCurrentConfig();
         }
@@ -2290,7 +2329,10 @@
             const token = prompt('Enter admin token:');
             if (token) {
                 localStorage.setItem('admin_token', token);
-                document.getElementById('adminToken').value = token;
+                const adminTokenElement = document.getElementById('adminToken');
+                if (adminTokenElement) {
+                    adminTokenElement.value = token;
+                }
                 showAlert('Token saved successfully!', 'success');
             }
         }
@@ -2301,17 +2343,22 @@
                 const webhookResponse = await fetch('/admin/webhook/config');
                 if (webhookResponse.ok) {
                     const webhookData = await webhookResponse.json();
-                    document.getElementById('webhookUrl').value = webhookData.webhook_url || '';
-                    document.getElementById('webhookTimeout').value = webhookData.timeout || 5;
+                    const webhookUrlElement = document.getElementById('webhookUrl');
+                    const webhookTimeoutElement = document.getElementById('webhookTimeout');
+                    if (webhookUrlElement) webhookUrlElement.value = webhookData.webhook_url || '';
+                    if (webhookTimeoutElement) webhookTimeoutElement.value = webhookData.timeout || 5;
                 }
                 
                 // Load finviz config
                 const finvizResponse = await fetch('/admin/finviz/config');
                 if (finvizResponse.ok) {
                     const finvizData = await finvizResponse.json();
-                    document.getElementById('finvizUrl').value = finvizData.finviz_url || '';
-                    document.getElementById('topN').value = finvizData.top_n || 15;
-                    document.getElementById('refreshInterval').value = finvizData.refresh_interval_sec || 10;
+                    const finvizUrlElement = document.getElementById('finvizUrl');
+                    const topNElement = document.getElementById('topN');
+                    const refreshIntervalElement = document.getElementById('refreshInterval');
+                    if (finvizUrlElement) finvizUrlElement.value = finvizData.finviz_url || '';
+                    if (topNElement) topNElement.value = finvizData.top_n || 15;
+                    if (refreshIntervalElement) refreshIntervalElement.value = finvizData.refresh_interval_sec || 10;
                 }
                 
                 // Load rate limiter config (from system status)
@@ -2319,8 +2366,10 @@
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
                     const rlInfo = statusData.system_info?.webhook_rate_limiter || {};
-                    document.getElementById('maxReqPerMin').value = rlInfo.max_req_per_min || 60;
-                    document.getElementById('rateLimitingEnabled').checked = !rlInfo.paused;
+                    const maxReqElement = document.getElementById('maxReqPerMin');
+                    const rateLimitingElement = document.getElementById('rateLimitingEnabled');
+                    if (maxReqElement) maxReqElement.value = rlInfo.max_req_per_min || 60;
+                    if (rateLimitingElement) rateLimitingElement.checked = !rlInfo.paused;
                 }
                 
             } catch (error) {
@@ -2333,8 +2382,16 @@
             const token = getAdminToken();
             if (!token) return;
             
-            const webhookUrl = document.getElementById('webhookUrl').value;
-            const timeout = document.getElementById('webhookTimeout').value;
+            const webhookUrlElement = document.getElementById('webhookUrl');
+            const timeoutElement = document.getElementById('webhookTimeout');
+            
+            if (!webhookUrlElement || !timeoutElement) {
+                showAlert('Webhook configuration fields not found', 'warning');
+                return;
+            }
+            
+            const webhookUrl = webhookUrlElement.value;
+            const timeout = timeoutElement.value;
             
             if (!webhookUrl) {
                 showAlert('Webhook URL is required', 'warning');
@@ -2367,9 +2424,18 @@
             const token = getAdminToken();
             if (!token) return;
             
-            const finvizUrl = document.getElementById('finvizUrl').value;
-            const topN = document.getElementById('topN').value;
-            const refreshInterval = document.getElementById('refreshInterval').value;
+            const finvizUrlElement = document.getElementById('finvizUrl');
+            const topNElement = document.getElementById('topN');
+            const refreshIntervalElement = document.getElementById('refreshInterval');
+            
+            if (!finvizUrlElement || !topNElement || !refreshIntervalElement) {
+                showAlert('Finviz configuration fields not found', 'warning');
+                return;
+            }
+            
+            const finvizUrl = finvizUrlElement.value;
+            const topN = topNElement.value;
+            const refreshInterval = refreshIntervalElement.value;
             
             if (!finvizUrl) {
                 showAlert('Finviz URL is required', 'warning');
@@ -2454,8 +2520,16 @@
             const token = getAdminToken();
             if (!token) return;
             
-            const maxReqPerMin = document.getElementById('maxReqPerMin').value;
-            const enabled = document.getElementById('rateLimitingEnabled').checked;
+            const maxReqElement = document.getElementById('maxReqPerMin');
+            const enabledElement = document.getElementById('rateLimitingEnabled');
+            
+            if (!maxReqElement || !enabledElement) {
+                showAlert('Rate limiter configuration fields not found', 'warning');
+                return;
+            }
+            
+            const maxReqPerMin = maxReqElement.value;
+            const enabled = enabledElement.checked;
             
             try {
                 const response = await fetch('/admin/webhook-rate-limiter/update', {
@@ -2494,7 +2568,13 @@
         }
         
         function saveAdminToken() {
-            const token = document.getElementById('adminToken').value;
+            const tokenElement = document.getElementById('adminToken');
+            if (!tokenElement) {
+                showAlert('Token field not found', 'warning');
+                return;
+            }
+            
+            const token = tokenElement.value;
             if (token) {
                 localStorage.setItem('admin_token', token);
                 showAlert('Token saved successfully!', 'success');
@@ -2505,28 +2585,43 @@
         
         function clearAdminToken() {
             localStorage.removeItem('admin_token');
-            document.getElementById('adminToken').value = '';
+            const tokenElement = document.getElementById('adminToken');
+            if (tokenElement) {
+                tokenElement.value = '';
+            }
             showAlert('Token removed', 'info');
         }
         
-        function toggleTokenVisibility() {
+        function toggleTokenVisibilityHandler() {
             const tokenInput = document.getElementById('adminToken');
             const toggleBtn = document.getElementById('toggleTokenVisibility');
+            
+            if (!tokenInput || !toggleBtn) {
+                return;
+            }
+            
             const icon = toggleBtn.querySelector('i');
             
             if (tokenInput.type === 'password') {
                 tokenInput.type = 'text';
-                icon.className = 'bi bi-eye-slash';
+                if (icon) {
+                    icon.className = 'bi bi-eye-slash';
+                }
             } else {
                 tokenInput.type = 'password';
-                icon.className = 'bi bi-eye';
+                if (icon) {
+                    icon.className = 'bi bi-eye';
+                }
             }
         }
         
         function loadSavedToken() {
             const savedToken = localStorage.getItem('admin_token');
             if (savedToken) {
-                document.getElementById('adminToken').value = savedToken;
+                const adminTokenElement = document.getElementById('adminToken');
+                if (adminTokenElement) {
+                    adminTokenElement.value = savedToken;
+                }
             }
         }
         
@@ -2670,5 +2765,126 @@
         // --- End Sell All List Cleanup Functions ---
 
     </script>
+
+    <!-- Configuration Modal -->
+    <div class="modal fade" id="configModal" tabindex="-1" aria-labelledby="configModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="configModalLabel">
+                        <i class="bi bi-gear"></i> System Configuration
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Token Management Section -->
+                    <div class="mb-4">
+                        <h6 class="text-primary mb-3">
+                            <i class="bi bi-key"></i> Admin Token Management
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="adminToken" placeholder="Enter admin token">
+                                    <button class="btn btn-outline-secondary" type="button" id="toggleTokenVisibility">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="btn-group w-100">
+                                    <button type="button" class="btn btn-primary" id="saveTokenBtn">
+                                        <i class="bi bi-save"></i> Save
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger" id="clearTokenBtn">
+                                        <i class="bi bi-trash"></i> Clear
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Load Current Config Button -->
+                    <div class="mb-4">
+                        <button type="button" class="btn btn-info w-100" id="loadCurrentConfigBtn">
+                            <i class="bi bi-download"></i> Load Current Configuration
+                        </button>
+                    </div>
+
+                    <!-- Webhook Configuration -->
+                    <div class="mb-4">
+                        <h6 class="text-primary mb-3">
+                            <i class="bi bi-webhook"></i> Webhook Configuration
+                        </h6>
+                        <div class="row mb-3">
+                            <div class="col-md-8">
+                                <label for="webhookUrl" class="form-label">Webhook URL</label>
+                                <input type="url" class="form-control" id="webhookUrl" placeholder="https://example.com/webhook">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="webhookTimeout" class="form-label">Timeout (seconds)</label>
+                                <input type="number" class="form-control" id="webhookTimeout" min="1" max="60" value="5">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-success" id="updateWebhookBtn">
+                            <i class="bi bi-check-circle"></i> Update Webhook Config
+                        </button>
+                    </div>
+
+                    <!-- Finviz Configuration -->
+                    <div class="mb-4">
+                        <h6 class="text-primary mb-3">
+                            <i class="bi bi-bar-chart"></i> Finviz Configuration
+                        </h6>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="finvizUrl" class="form-label">Finviz URL</label>
+                                <input type="url" class="form-control" id="finvizUrl" placeholder="https://finviz.com/screener.ashx?...">
+                            </div>
+                            <div class="col-md-3">
+                                <label for="topN" class="form-label">Top N</label>
+                                <input type="number" class="form-control" id="topN" min="1" max="100" value="15">
+                            </div>
+                            <div class="col-md-3">
+                                <label for="refreshInterval" class="form-label">Refresh Interval (sec)</label>
+                                <input type="number" class="form-control" id="refreshInterval" min="5" max="3600" value="10">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-success" id="updateFinvizBtn">
+                            <i class="bi bi-check-circle"></i> Update Finviz Config
+                        </button>
+                    </div>
+
+                    <!-- Rate Limiter Configuration -->
+                    <div class="mb-4">
+                        <h6 class="text-primary mb-3">
+                            <i class="bi bi-speedometer2"></i> Rate Limiter Configuration
+                        </h6>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="maxReqPerMin" class="form-label">Max Requests per Minute</label>
+                                <input type="number" class="form-control" id="maxReqPerMin" min="1" max="1000" value="60">
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="rateLimitingEnabled" checked>
+                                    <label class="form-check-label" for="rateLimitingEnabled">
+                                        Enable Rate Limiting
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-success" id="updateRateLimiterBtn">
+                            <i class="bi bi-check-circle"></i> Update Rate Limiter Config
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>
