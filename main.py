@@ -932,15 +932,19 @@ async def get_auth_status_data() -> Dict[str, Any]:
         _logger.error(f"Error getting auth status data: {e}")
         return {"auth_session_valid": False}
 
-async def get_sell_all_list_data() -> List[str]:
-    """Get current sell all list data for comm_engine."""
+async def get_sell_all_list_data() -> Dict[str, Any]:
+    """Get current sell all list data for comm_engine with consistent format."""
     try:
         # sell_all_data = sorted(list(shared_state.get('sell_all_accumulator', []))) # Old way
-        sell_all_data = sorted(list(shared_state.get('sell_all_accumulator', {}).keys())) # New way
-        return sell_all_data
+        tickers_list = sorted(list(shared_state.get('sell_all_accumulator', {}).keys())) # New way
+        return {
+            "tickers": tickers_list,
+            "count": len(tickers_list),
+            "timestamp": time.time()
+        }
     except Exception as e:
         _logger.error(f"Error getting sell all list data: {e}")
-        return []
+        return {"tickers": [], "count": 0, "timestamp": time.time()}
 
 @app.on_event("startup")
 async def _startup() -> None:
@@ -2232,7 +2236,8 @@ async def clear_sell_all_list(payload: TokenPayload):
         _logger.info(f"Sell All list cleared manually. Removed {count} tickers.")
 
         # Broadcast the empty list to all admin clients
-        await comm_engine.trigger_sell_all_list_update([]) # Send empty list
+        empty_list_data = await get_sell_all_list_data()  # This will return proper format
+        await comm_engine.trigger_sell_all_list_update(empty_list_data)
 
         return {"message": f"Successfully cleared {count} tickers from the Sell All list."}
     except Exception as e:

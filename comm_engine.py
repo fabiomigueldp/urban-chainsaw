@@ -211,7 +211,7 @@ class CommunicationEngine:
         """Broadcast authentication status update - INSTANT like metrics."""
         await self.broadcast("auth_status_update", data)
 
-    async def broadcast_sell_all_list_update(self, data: List[str]):
+    async def broadcast_sell_all_list_update(self, data: Dict[str, Any]):
         """Broadcast sell all list update - INSTANT like metrics."""
         await self.broadcast("sell_all_list_update", data)
 
@@ -290,7 +290,7 @@ class CommunicationEngine:
             return
         await self.broadcast_auth_status_update(data)
 
-    async def trigger_sell_all_list_update(self, data: Optional[List[str]] = None):
+    async def trigger_sell_all_list_update(self, data: Optional[Dict[str, Any]] = None):
         """Trigger sell all list update broadcast."""
         if data is None:
             _logger.warning("trigger_sell_all_list_update called without data")
@@ -325,10 +325,6 @@ class CommunicationEngine:
     def get_connected_clients(self) -> List[Any]:
         """Get list of connected WebSocket clients."""
         return list(self.active_connections)
-
-    async def trigger_sell_all_list_update(self, data: Dict[str, Any]):
-        """Trigger sell all list update broadcast."""
-        await self.broadcast("sell_all_list_update", data)
 
 # Global instance - following the shared_state pattern
 comm_engine = CommunicationEngine()
