@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Create extension for better JSON handling
 CREATE EXTENSION IF NOT EXISTS "btree_gin";
 
-# =============================================================================
+-- =============================================================================
 -- SIMPLE SCHEMA - MAIN TABLES
 -- =============================================================================
 

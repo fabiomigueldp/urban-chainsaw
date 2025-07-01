@@ -201,15 +201,40 @@ def wait_for_database() -> bool:
                 if result.returncode == 0:
                     print_success("✅ PostgreSQL is available and accepting connections")
                     return True
+                else:
+                    # Show more detailed error information
+                    print(f"🔄 Attempt {attempt + 1}/{max_attempts} - PostgreSQL not ready yet...")
+                    if result.stderr:
+                        print(f"   Error: {result.stderr.strip()}")
+            else:
+                print(f"🔄 Attempt {attempt + 1}/{max_attempts} - PostgreSQL container not running...")
             
-            print(f"🔄 Attempt {attempt + 1}/{max_attempts} - waiting for PostgreSQL...")
             time.sleep(2)
             
-        except subprocess.CalledProcessError:
-            print(f"🔄 Tentativa {attempt + 1}/{max_attempts} - PostgreSQL ainda não está pronto...")
+        except subprocess.CalledProcessError as e:
+            print(f"🔄 Attempt {attempt + 1}/{max_attempts} - PostgreSQL health check failed...")
+            if e.stderr:
+                print(f"   Error: {e.stderr.strip()}")
             time.sleep(2)
     
     print_error("❌ PostgreSQL did not become available within expected time")
+    
+    # Additional diagnostics
+    print_step("🔍 Database diagnostics:")
+    try:
+        # Show container status
+        result = run_command(["docker", "compose", "ps", "postgres"], capture_output=True, check=False)
+        print("Container status:")
+        print(result.stdout)
+        
+        # Show recent logs
+        result = run_command(["docker", "compose", "logs", "--tail", "20", "postgres"], capture_output=True, check=False)
+        print("Recent database logs:")
+        print(result.stdout)
+        
+    except Exception as e:
+        print(f"Error getting diagnostics: {e}")
+    
     return False
 
 def initialize_database() -> bool:
@@ -838,6 +863,86 @@ def create_missing_config_files() -> None:
         else:
             print_success(f"✅ {config_file} already exists")
 
+def rebuild_database_only(use_sudo: bool = False) -> bool:
+    """Rebuilds only the database container and volume - preserves application."""
+    print_step("🔄 Starting DATABASE-ONLY rebuild process...")
+    print_colored("⚠️  WARNING: This will DELETE ALL DATABASE DATA! ⚠️", Colors.WARNING)
+    
+    # Confirm the destructive operation
+    print_colored("\n🚨 DATABASE DESTRUCTION CONFIRMATION 🚨", Colors.FAIL)
+    print_colored("This will permanently delete:", Colors.WARNING)
+    print_colored("  • Database container (trading-db)", Colors.WARNING)
+    print_colored("  • All database data and volumes", Colors.WARNING)
+    print_colored("  • Application will be restarted to reconnect", Colors.WARNING)
+    
+    try:
+        # 1. Stop database container specifically
+        print_step("🛑 Stopping database container...")
+        try:
+            run_command(["docker", "stop", "trading-db"], use_sudo=use_sudo, check=False)
+            run_command(["docker", "rm", "-f", "trading-db"], use_sudo=use_sudo, check=False)
+            print_success("✅ Database container stopped and removed")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error stopping database container: {e}")
+        
+        # 2. Remove database volumes only
+        print_step("💾 Removing database volumes...")
+        try:
+            result = run_command(["docker", "volume", "ls", "--filter", "name=postgres_data", "--format", "{{.Name}}"])
+            if result.stdout.strip():
+                volume_names = [name for name in result.stdout.strip().split('\n') if 'postgres_data' in name]
+                for volume_name in volume_names:
+                    run_command(["docker", "volume", "rm", "-f", volume_name], use_sudo=use_sudo, check=False)
+                print_success(f"✅ Removed {len(volume_names)} database volumes")
+            else:
+                print_success("✅ No database volumes found to remove")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error removing database volumes: {e}")
+        
+        # 3. Remove database image to force fresh pull
+        print_step("🗑️ Removing database image...")
+        try:
+            run_command(["docker", "rmi", "-f", "postgres:15-alpine"], use_sudo=use_sudo, check=False)
+            print_success("✅ Database image removed")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error removing database image: {e}")
+        
+        # 4. Start fresh database
+        print_step("🚀 Starting fresh database...")
+        run_command(["docker", "compose", "up", "-d", "postgres"], capture_output=False, use_sudo=use_sudo)
+        
+        # 5. Wait for database to be healthy
+        print_step("⏳ Waiting for database to be ready...")
+        if wait_for_database():
+            print_success("✅ Database is ready!")
+        else:
+            print_warning("⚠️ Database health check failed")
+        
+        # 6. Restart application to reconnect to fresh database
+        print_step("🔄 Restarting application...")
+        try:
+            run_command(["docker", "compose", "restart", "trading-signal-processor"], use_sudo=use_sudo)
+            print_success("✅ Application restarted")
+        except subprocess.CalledProcessError as e:
+            print_warning(f"⚠️ Error restarting application: {e}")
+        
+        # 7. Final health check
+        if wait_for_health_check():
+            print_success("🎉 DATABASE REBUILD COMPLETED SUCCESSFULLY!")
+            print_colored("✨ Fresh database is ready!", Colors.OKGREEN)
+            
+            # 8. Show final status
+            print_step("📊 System status after database rebuild:")
+            show_status()
+            return True
+        else:
+            print_warning("⚠️ Application health check failed after database rebuild")
+            return False
+            
+    except subprocess.CalledProcessError as e:
+        print_error(f"❌ Database rebuild failed: {e}")
+        return False
+
 def rebuild_application_from_scratch(use_sudo: bool = False) -> bool:
     """Complete rebuild - removes all containers, volumes, images and rebuilds everything from scratch."""
     print_step("🔥 Starting COMPLETE REBUILD from scratch...")
@@ -959,6 +1064,7 @@ def main():
     parser.add_argument("--quickupdate", action="store_true", help="Quick update with maximum cache preservation (preserves database)")
     parser.add_argument("--quickupgrade", action="store_true", help="Alias for --quickupdate")
     parser.add_argument("--rebuild", action="store_true", help="Complete rebuild - removes all containers, volumes, images and rebuilds everything from scratch (DESTRUCTIVE)")
+    parser.add_argument("--db", action="store_true", help="Rebuild only the database - removes database container and volume, creates fresh database (DESTRUCTIVE for database only)")
     
     args = parser.parse_args()
     
@@ -981,6 +1087,28 @@ def main():
     # Check if should only show status
     if args.status_only:
         show_status()
+        return
+    
+    # Check if should rebuild database only
+    if args.db:
+        print_step("🔄 Starting DATABASE-ONLY rebuild process...")
+        
+        # Initial checks
+        print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
+        use_sudo = False  # Windows doesn't use sudo
+        
+        if not check_docker():
+            sys.exit(1)
+        
+        if not check_docker_compose():
+            sys.exit(1)
+        
+        # Run database rebuild process
+        if rebuild_database_only(use_sudo):
+            print_success("🔄 DATABASE REBUILD COMPLETED SUCCESSFULLY!")
+        else:
+            print_error("❌ Database rebuild failed!")
+            sys.exit(1)
         return
     
     # Check if should do complete rebuild
@@ -1059,35 +1187,6 @@ def main():
             sys.exit(1)
         return
     
-    # Check if should do rebuild from scratch
-    if args.rebuild:
-        print_step("🔥 Starting COMPLETE REBUILD from scratch...")
-        print_colored("⚠️  WARNING: This will DELETE ALL DATA including database! ⚠️", Colors.WARNING)
-        
-        # Confirm the destructive operation
-        confirm = input("Type 'YES' to confirm destruction: ").strip().upper()
-        if confirm != 'YES':
-            print_warning("Rebuild aborted by user")
-            return
-        
-        # Initial checks
-        print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
-        use_sudo = False  # Windows doesn't use sudo
-        
-        if not check_docker():
-            sys.exit(1)
-        
-        if not check_docker_compose():
-            sys.exit(1)
-        
-        # Run rebuild from scratch
-        if rebuild_application_from_scratch(use_sudo):
-            print_success("🎉 COMPLETE REBUILD SUCCESSFUL!")
-        else:
-            print_error("❌ Rebuild failed!")
-            sys.exit(1)
-        return
-    
     # Initial checks
     print_colored("🔧 CONFIGURING MAXIMUM PRIVILEGES", Colors.BOLD)
     use_sudo = run_with_maximum_privileges()
@@ -1150,6 +1249,7 @@ def main():
 ║  For full update:         python run.py --update            ║
 ║  For upgrade:             python run.py --upgrade           ║
 ║  For complete rebuild:    python run.py --rebuild           ║
+║  For database rebuild:    python run.py --db                ║
 ║  To view logs:            python run.py --logs              ║
 ║  To follow logs:          python run.py --follow-logs       ║
 ║  To view status:          python run.py --status-only       ║
@@ -1159,6 +1259,7 @@ def main():
 ║  🔄 FULL UPDATE: Complete rebuild for major changes        ║
 ║  🔥 REBUILD: Nuclear option - deletes EVERYTHING and       ║
 ║      rebuilds from scratch (including database!)           ║
+║  🔄 DB REBUILD: Deletes only database, keeps application   ║
 ║  🛡️  Updates preserve database and configs (except rebuild) ║
 ║                                                              ║
 ║  ⚠️  WARNING: Container running as ROOT to resolve          ║
