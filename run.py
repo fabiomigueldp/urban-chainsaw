@@ -441,14 +441,62 @@ def build_and_start_fast(use_sudo: bool = False) -> bool:
         run_command(["docker", "compose", "build"], capture_output=False, use_sudo=use_sudo)
         
         print("🚀 Starting application with maximum privileges...")
-        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
+        result = run_command(["docker", "compose", "up", "-d"], capture_output=True, use_sudo=use_sudo, check=False)
         
-        print_success("Application started successfully")
+        if result.returncode != 0:
+            print_error("❌ Failed to start application")
+            print("STDOUT:", result.stdout)
+            print("STDERR:", result.stderr)
+            
+            # Provide detailed diagnostics
+            diagnose_startup_failure()
+            return False
+        
+        print_success("Application startup initiated successfully")
         return True
         
     except subprocess.CalledProcessError as e:
         print_error(f"Error starting application: {e}")
+        diagnose_startup_failure()
         return False
+
+def diagnose_startup_failure() -> None:
+    """Provides detailed diagnostics when startup fails."""
+    print_step("🔍 Analyzing startup failure...")
+    
+    try:
+        # Check all container statuses
+        result = run_command(["docker", "compose", "ps"], capture_output=True, check=False)
+        print("Container Status:")
+        print(result.stdout)
+        
+        # Check database container specifically
+        result = run_command(["docker", "ps", "--filter", "name=trading-db", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"], capture_output=True, check=False)
+        print("\nDatabase Container Details:")
+        print(result.stdout)
+        
+        # Show database logs
+        print("\n📋 Recent Database Logs:")
+        result = run_command(["docker", "compose", "logs", "--tail", "30", "postgres"], capture_output=True, check=False)
+        print(result.stdout)
+        
+        # Show application logs
+        print("\n📋 Recent Application Logs:")
+        result = run_command(["docker", "compose", "logs", "--tail", "20", "trading-signal-processor"], capture_output=True, check=False)
+        print(result.stdout)
+        
+        # Check volume status
+        result = run_command(["docker", "volume", "ls", "--filter", "name=postgres_data"], capture_output=True, check=False)
+        print("\n💾 Database Volume Status:")
+        print(result.stdout)
+        
+        # Check network connectivity
+        result = run_command(["docker", "network", "ls", "--filter", "name=trading-network"], capture_output=True, check=False)
+        print("\n🌐 Network Status:")
+        print(result.stdout)
+        
+    except Exception as e:
+        print_error(f"Error during diagnostics: {e}")
 
 def build_and_start(use_sudo: bool = False) -> bool:
     """Builds and starts the application."""
@@ -459,13 +507,23 @@ def build_and_start(use_sudo: bool = False) -> bool:
         run_command(["docker", "compose", "build", "--no-cache"], capture_output=False, use_sudo=use_sudo)
         
         print("🚀 Starting application with maximum privileges...")
-        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
+        result = run_command(["docker", "compose", "up", "-d"], capture_output=True, use_sudo=use_sudo, check=False)
         
-        print_success("Application started successfully")
+        if result.returncode != 0:
+            print_error("❌ Failed to start application")
+            print("STDOUT:", result.stdout)
+            print("STDERR:", result.stderr)
+            
+            # Provide detailed diagnostics
+            diagnose_startup_failure()
+            return False
+        
+        print_success("Application startup initiated successfully")
         return True
         
     except subprocess.CalledProcessError as e:
-        print_error(f"Erro ao iniciar aplicação: {e}")
+        print_error(f"Error starting application: {e}")
+        diagnose_startup_failure()
         return False
 
 def wait_for_health_check() -> bool:
