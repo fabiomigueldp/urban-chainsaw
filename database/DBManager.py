@@ -23,7 +23,7 @@ from sqlalchemy.orm import selectinload
 # Project imports
 from config import settings
 from models import Signal as SignalPayload, SignalTracker, AuditTrailQuery, AuditTrailResponse
-from database.simple_models import Base, Signal, SignalEvent, SignalStatusEnum, SignalLocationEnum, MetricPeriodEnum, SignalTypeEnum
+from database.simple_models import Base, Signal, SignalEvent, SignalStatusEnum, SignalLocationEnum, MetricPeriodEnum, SignalTypeEnum, Position, PositionStatusEnum
 
 _logger = logging.getLogger("DBManager")
 
@@ -1057,6 +1057,75 @@ class DBManager:
             _logger.warning(f"CSV Import had {len(errors)} errors. First few: {errors[:3]}")
         
         return summary
+
+    # --- Position Management Methods ---
+
+    async def open_position(self, ticker: str, entry_signal_id: str):
+        """Creates a new record for an open position."""
+        async with self.get_session() as session:
+            new_position = Position(
+                ticker=ticker.upper(),
+                entry_signal_id=entry_signal_id,
+                status=PositionStatusEnum.OPEN.value
+            )
+            session.add(new_position)
+            await session.flush()
+            _logger.info(f"Position opened for {ticker} linked to signal {entry_signal_id}.")
+
+    async def mark_position_as_closing(self, ticker: str, exit_signal_id: str) -> bool:
+        """Finds the latest open position for a ticker and marks it as 'closing'."""
+        async with self.get_session() as session:
+            stmt = select(Position).where(
+                Position.ticker == ticker.upper(),
+                Position.status == PositionStatusEnum.OPEN.value
+            ).order_by(desc(Position.opened_at)).limit(1)
+            
+            result = await session.execute(stmt)
+            position_to_close = result.scalar_one_or_none()
+
+            if position_to_close:
+                position_to_close.status = PositionStatusEnum.CLOSING.value
+                position_to_close.exit_signal_id = exit_signal_id
+                await session.flush()
+                _logger.info(f"Position for {ticker} marked as CLOSING, linked to exit signal {exit_signal_id}.")
+                return True
+            else:
+                _logger.warning(f"Attempted to mark a position as closing for {ticker}, but no open position was found.")
+                return False
+
+    async def close_position(self, exit_signal_id: str) -> bool:
+        """Finalizes a position to 'closed' status after a sell signal is successfully forwarded."""
+        async with self.get_session() as session:
+            stmt = select(Position).where(Position.exit_signal_id == exit_signal_id)
+            result = await session.execute(stmt)
+            position_to_close = result.scalar_one_or_none()
+
+            if position_to_close:
+                position_to_close.status = PositionStatusEnum.CLOSED.value
+                position_to_close.closed_at = datetime.utcnow()
+                await session.flush()
+                _logger.info(f"Position for {position_to_close.ticker} successfully CLOSED by signal {exit_signal_id}.")
+                return True
+            return False
+
+    async def is_position_open(self, ticker: str) -> bool:
+        """Checks if there is at least one 'open' position for a given ticker."""
+        async with self.get_session() as session:
+            stmt = select(func.count(Position.id)).where(
+                Position.ticker == ticker.upper(),
+                Position.status == PositionStatusEnum.OPEN.value
+            )
+            result = await session.execute(stmt)
+            count = result.scalar_one()
+            return count > 0
+
+    async def get_all_open_positions_tickers(self) -> List[str]:
+        """Returns a list of all tickers that currently have an 'open' position."""
+        async with self.get_session() as session:
+            stmt = select(Position.ticker).where(Position.status == PositionStatusEnum.OPEN.value).distinct()
+            result = await session.execute(stmt)
+            tickers = result.scalars().all()
+            return tickers
 
 # Global Singleton Instance - to be imported throughout the application
 db_manager = DBManager()

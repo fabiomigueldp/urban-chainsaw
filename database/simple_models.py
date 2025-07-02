@@ -96,3 +96,27 @@ class SignalEvent(Base):
     
     # Relationship
     signal = relationship("Signal", back_populates="events")
+
+class PositionStatusEnum(enum.Enum):
+    """Lifecycle status of a trade position."""
+    OPEN = "open"
+    CLOSING = "closing" # A sell order has been approved and sent, awaiting confirmation
+    CLOSED = "closed"
+
+class Position(Base):
+    """Represents a single trade position in the database."""
+    __tablename__ = "positions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default=PositionStatusEnum.OPEN.value, index=True)
+    
+    entry_signal_id = Column(UUID(as_uuid=True), ForeignKey('signals.signal_id'), nullable=False)
+    exit_signal_id = Column(UUID(as_uuid=True), ForeignKey('signals.signal_id'), nullable=True)
+
+    opened_at = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
+    closed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # Relationships to the Signal table for easy joins if needed in the future
+    entry_signal = relationship("Signal", foreign_keys=[entry_signal_id])
+    exit_signal = relationship("Signal", foreign_keys=[exit_signal_id])

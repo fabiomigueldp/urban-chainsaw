@@ -202,7 +202,6 @@ shared_state: Dict[str, Any] = {
     "finviz_engine_instance": None, # To hold the FinvizEngine instance
     "webhook_rate_limiter_instance": None, # To hold the WebhookRateLimiter instance
     "signal_metrics": signal_metrics,
-    "sell_all_accumulator": {}, # Will store {ticker: added_timestamp}
     "signal_trackers": {},  # Initialize signal trackers dictionary
 }
 
@@ -253,147 +252,94 @@ _logger = logging.getLogger("processor")
 # ---------------------------------------------------------------------------- #
 
 async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
-    """Process signals from the main queue."""
-    _logger.info(f"Queue worker {worker_id} started")
+    """Processes signals from the queue with intelligent logic for buy and sell actions."""
+    _logger.info(f"Decision worker {worker_id} started")
     
     while True:
         try:
-            # Get signal from queue
-            signal = await queue.get()
+            signal: Signal = await queue.get()
             signal_id = signal.signal_id
-            
-            # Increment active processing workers counter
+            normalised_ticker = signal.normalised_ticker()
+
             shared_state["signal_metrics"]["processing_workers_active"] += 1
+            await db_manager.log_signal_event(
+                signal_id=signal_id,
+                event_type=SignalStatusEnum.PROCESSING,
+                details=f"Signal picked up by decision worker {worker_id}",
+                worker_id=f"decision_worker_{worker_id}"
+            )
+
+            # Step 1: Identify the action type (BUY or SELL)
+            action_type = "unknown"
+            sell_triggers = {"sell", "exit", "close"}
+            buy_triggers = {"buy", "long", "enter"}
             
-            _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Processing signal for ticker: {signal.normalised_ticker()}")
+            sig_action = getattr(signal, 'action', '' or '').lower()
+            sig_side = getattr(signal, 'side', '' or '').lower()
+
+            if sig_action in sell_triggers or sig_side in sell_triggers:
+                action_type = "SELL"
+            elif sig_action in buy_triggers or sig_side in buy_triggers:
+                action_type = "BUY"
             
-            # Log processing event to database
-            try:
-                await db_manager.log_signal_event(
-                    signal_id=signal_id,
-                    event_type=SignalStatusEnum.PROCESSING,
-                    details="Signal being processed by worker",
-                    worker_id=f"queue_worker_{worker_id}"
-                )
-            except Exception as db_error:
-                _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log processing start to database: {db_error}")
-            
-            try:
-                # Get current tickers
+            _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Detected action: {action_type} for {normalised_ticker}")
+
+            # Step 2: Apply the correct validation logic
+            is_approved = False
+            approval_reason = ""
+
+            if action_type == "BUY":
                 current_tickers = await get_tickers_func()
-                normalised_ticker = signal.normalised_ticker()
-                
-                # Check if ticker is in top-N list
                 if normalised_ticker in current_tickers:
-                    # Approve signal
-                    shared_state["signal_metrics"]["signals_approved"] += 1
-                    current_approved_count = shared_state["signal_metrics"]["signals_approved"]
-                    
-                    _logger.info(f"✅ [WORKER {worker_id}] [SIGNAL: {signal_id}] Signal APPROVED - ticker {normalised_ticker} is in top-N list (total approved: {current_approved_count})")
-                    
-                    # Log approval event to database
-                    try:
-                        await db_manager.log_signal_event(
-                            signal_id=signal_id,
-                            event_type=SignalStatusEnum.APPROVED,
-                            details=f"Signal approved - ticker {normalised_ticker} found in top-{len(current_tickers)} list",
-                            worker_id=f"queue_worker_{worker_id}"
-                        )
-                        _logger.debug(f"📝 [WORKER {worker_id}] [SIGNAL: {signal_id}] Approval logged to database")
-                    except Exception as db_error:
-                        _logger.error(f"❌ [WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log approval to database: {db_error}")
-                    
-                    # Prepare data for approved queue
-                    approved_signal_data = {
-                        'signal': signal,
-                        'ticker': normalised_ticker,
-                        'approved_at': time.time(),
-                        'worker_id': f"queue_worker_{worker_id}",
-                        'signal_id': signal_id
-                    }
-                      # Add to approved queue
-                    await approved_signal_queue.put(approved_signal_data)
-                    
-                    # Log queued for forwarding event to database
-                    try:
-                        await db_manager.log_signal_event(
-                            signal_id=signal_id,
-                            event_type=SignalStatusEnum.QUEUED_FORWARDING,
-                            location=SignalLocationEnum.APPROVED_QUEUE,
-                            details="Signal queued for forwarding",
-                            worker_id=f"queue_worker_{worker_id}"
-                        )
-                    except Exception as db_error:
-                        _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log forwarding queue to database: {db_error}")
-                    
-                    # Add to sell_all_accumulator if it's a buy signal
-                    # Check signal.side exists and is a buy signal (default to buy if None)
-                    is_buy_signal = (signal.side is None or 
-                                   (signal.side is not None and signal.side.lower() in ['buy', 'long']))
-                    
-                    # Also check action field as backup (some signals use 'action' instead of 'side')
-                    if hasattr(signal, 'action') and signal.action is not None:
-                        is_buy_signal = is_buy_signal or signal.action.lower() in ['buy', 'long']
-                    
-                    if is_buy_signal:
-                        # shared_state['sell_all_accumulator'].add(normalised_ticker) # Old way
-                        shared_state['sell_all_accumulator'][normalised_ticker] = time.time() # New way
-                        _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Added {normalised_ticker} to sell_all_accumulator (side: {signal.side}, action: {getattr(signal, 'action', None)})")
-                        
-                        # Broadcast updated sell_all_accumulator
-                        sell_all_data = await get_sell_all_list_data()
-                        await comm_engine.trigger_sell_all_list_update(sell_all_data)
-                    else:
-                        _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Not adding {normalised_ticker} to sell_all_accumulator - not a buy signal (side: {signal.side}, action: {getattr(signal, 'action', None)})")
-                    
+                    is_approved = True
+                    approval_reason = f"Ticker found in Finviz Top-{len(current_tickers)} list."
                 else:
-                    # Reject signal
-                    _logger.info(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Signal REJECTED - ticker {normalised_ticker} not in top-N list")
-                    
-                    shared_state["signal_metrics"]["signals_rejected"] += 1
-                      # Log rejection event to database
-                    event_details = f"Signal rejected - ticker {normalised_ticker} not in top-{len(current_tickers)} list"
-                    try:
-                        await db_manager.log_signal_event(
-                            signal_id=signal_id,
-                            event_type=SignalStatusEnum.REJECTED,
-                            location=SignalLocationEnum.DISCARDED,
-                            details=event_details,
-                            worker_id=f"queue_worker_{worker_id}"
-                        )
-                    except Exception as db_error:
-                        _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log rejection to database: {db_error}")
+                    approval_reason = f"Ticker not in Finviz Top-{len(current_tickers)} list."
+            
+            elif action_type == "SELL":
+                position_is_open = await db_manager.is_position_open(normalised_ticker)
+                if position_is_open:
+                    is_approved = True
+                    approval_reason = "Validated against an open position in the database."
+                else:
+                    approval_reason = f"No open position found for ticker '{normalised_ticker}' in the database."
+            
+            else: # Unknown action type
+                approval_reason = f"Signal action/side ('{sig_action}'/'{sig_side}') is not recognized as BUY or SELL."
+
+            # Step 3: Process the validation result
+            if is_approved:
+                shared_state["signal_metrics"]["signals_approved"] += 1
+                _logger.info(f"✅ [WORKER {worker_id}] [SIGNAL: {signal_id}] Signal APPROVED. Reason: {approval_reason}")
                 
-                # Broadcast updated metrics
-                await comm_engine.broadcast("metrics_update", get_current_metrics())
+                await db_manager.log_signal_event(signal_id=signal_id, event_type=SignalStatusEnum.APPROVED, details=approval_reason)
                 
-            except Exception as e:
-                _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Error processing signal: {e}")
-                
-                # Log error event to database
-                try:
-                    await db_manager.log_signal_event(
-                        signal_id=signal_id,
-                        event_type=SignalStatusEnum.ERROR,
-                        location=SignalLocationEnum.WORKER_PROCESSING,                        details=f"Error processing signal: {str(e)}",
-                        worker_id=f"queue_worker_{worker_id}",
-                        error_info={"type": "processing_error", "message": str(e)}
-                    )
-                except Exception as db_error:
-                    _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id}] Failed to log error to database: {db_error}")
-            finally:
-                # Decrement active processing workers counter
-                shared_state["signal_metrics"]["processing_workers_active"] -= 1
-                
-                # Broadcast updated metrics
-                await comm_engine.broadcast("metrics_update", get_current_metrics())
-                
-                # Processing completed - cleanup happens through database
-                pass
-                
+                if action_type == "BUY":
+                    await db_manager.open_position(ticker=normalised_ticker, entry_signal_id=signal_id)
+                elif action_type == "SELL":
+                    await db_manager.mark_position_as_closing(ticker=normalised_ticker, exit_signal_id=signal_id)
+
+                await approved_signal_queue.put({
+                    'signal': signal, 'ticker': normalised_ticker, 'approved_at': time.time(),
+                    'worker_id': f"decision_worker_{worker_id}", 'signal_id': signal_id
+                })
+                await db_manager.log_signal_event(signal_id=signal_id, event_type=SignalStatusEnum.QUEUED_FORWARDING, details="Signal queued for forwarding.")
+            
+            else: # Rejected
+                shared_state["signal_metrics"]["signals_rejected"] += 1
+                _logger.warning(f"❌ [WORKER {worker_id}] [SIGNAL: {signal_id}] Signal REJECTED. Reason: {approval_reason}")
+                await db_manager.log_signal_event(signal_id=signal_id, event_type=SignalStatusEnum.REJECTED, details=approval_reason, location=SignalLocationEnum.DISCARDED)
+
         except Exception as e:
-            _logger.error(f"Queue worker {worker_id} error: {e}")
-            await asyncio.sleep(1)  # Brief pause before continuing
+            signal_id_for_error = signal.signal_id if 'signal' in locals() else "unknown"
+            _logger.error(f"[WORKER {worker_id}] [SIGNAL: {signal_id_for_error}] Critical error during processing: {e}", exc_info=True)
+            if 'signal' in locals():
+                await db_manager.log_signal_event(signal_id=signal_id_for_error, event_type=SignalStatusEnum.ERROR, details=str(e))
+        finally:
+            if 'signal' in locals():
+                queue.task_done()
+            shared_state["signal_metrics"]["processing_workers_active"] -= 1
+            await comm_engine.broadcast("metrics_update", get_current_metrics())
 
 async def _forwarding_worker(worker_id: int) -> None:
     """Forward approved signals from the approved queue."""
@@ -465,6 +411,17 @@ async def _forwarding_worker(worker_id: int) -> None:
                         headers={"Content-Type": "application/json"}
                     )
                     response.raise_for_status()
+                    
+                    # --- INSERT NEW CODE BLOCK HERE ---
+                    # After a successful forward, check if it was a sell signal to close the position
+                    sig_action = getattr(signal, 'action', '' or '').lower()
+                    sig_side = getattr(signal, 'side', '' or '').lower()
+                    sell_triggers = {"sell", "exit", "close"}
+                    if sig_action in sell_triggers or sig_side in sell_triggers:
+                        closed = await db_manager.close_position(exit_signal_id=signal_id)
+                        if not closed:
+                             _logger.warning(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] A sell signal was forwarded, but no corresponding 'closing' position was found in DB to finalize.")
+                    # --- END OF NEW CODE BLOCK ---
                     
                     _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Signal forwarded successfully - HTTP {response.status_code}")
                     
@@ -547,48 +504,6 @@ async def _forwarding_worker(worker_id: int) -> None:
             _logger.error(f"Forwarding worker {worker_id} error: {type(e).__name__}: {str(e)}")
             _logger.error(f"Forwarding worker {worker_id} full exception:", exc_info=True)
             await asyncio.sleep(1)  # Brief pause before continuing
-
-async def _sell_all_list_cleanup_worker():
-    """Periodically cleans expired tickers from the Sell All list."""
-    _logger.info("🧹 Sell All List cleanup worker started.")
-    while True:
-        await asyncio.sleep(60) # Check every 60 seconds
-
-        try:
-            # Load current configuration from system_config.json
-            from system_config import get_sell_all_cleanup_config
-            cleanup_config = get_sell_all_cleanup_config()
-            
-            if not cleanup_config["enabled"]:
-                continue # Skip if the feature is disabled
-
-            now = time.time()
-            lifetime_seconds = cleanup_config["lifetime_hours"] * 3600
-            accumulator = shared_state['sell_all_accumulator']
-
-            # It's crucial to iterate over a copy of the keys to modify the dict during iteration
-            tickers_to_remove = [
-                ticker for ticker, added_at in accumulator.items()
-                if (now - added_at) > lifetime_seconds
-            ]
-
-            if tickers_to_remove:
-                removed_count = 0
-                for ticker in tickers_to_remove:
-                    if ticker in accumulator: # Check if ticker still exists before deleting
-                        del accumulator[ticker]
-                        removed_count += 1
-
-                if removed_count > 0: # Only log and broadcast if something was actually removed
-                    _logger.info(f"🧹 Sell All Cleanup: Removed {removed_count} expired ticker(s): {tickers_to_remove}")
-
-                    # Broadcast the updated list to all admin clients
-                    updated_list_data = await get_sell_all_list_data() # Ensure this function is available
-                    await comm_engine.trigger_sell_all_list_update(updated_list_data)
-
-        except Exception as e:
-            _logger.error(f"Error in Sell All List cleanup worker: {e}", exc_info=True)
-
 
 # ---------------------------------------------------------------------------- #
 # FastAPI application                                                          #
@@ -935,17 +850,16 @@ async def get_auth_status_data() -> Dict[str, Any]:
         return {"auth_session_valid": False}
 
 async def get_sell_all_list_data() -> Dict[str, Any]:
-    """Get current sell all list data for comm_engine with consistent format."""
+    """Get the current list of tickers with open positions for comm_engine."""
     try:
-        # sell_all_data = sorted(list(shared_state.get('sell_all_accumulator', []))) # Old way
-        tickers_list = sorted(list(shared_state.get('sell_all_accumulator', {}).keys())) # New way
+        open_tickers = await db_manager.get_all_open_positions_tickers()
         return {
-            "tickers": tickers_list,
-            "count": len(tickers_list),
+            "tickers": sorted(open_tickers),
+            "count": len(open_tickers),
             "timestamp": time.time()
         }
     except Exception as e:
-        _logger.error(f"Error getting sell all list data: {e}")
+        _logger.error(f"Error getting sell all list data from DB: {e}")
         return {"tickers": [], "count": 0, "timestamp": time.time()}
 
 @app.on_event("startup")
@@ -1072,11 +986,6 @@ async def _startup() -> None:
     
     asyncio.create_task(admin_updates_task())
     _logger.info("Admin WebSocket updates task started")
-
-    # Start the Sell All list cleanup worker
-    asyncio.create_task(_sell_all_list_cleanup_worker())
-    _logger.info("Sell All List cleanup worker task scheduled.")
-
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
@@ -1654,11 +1563,7 @@ async def sell_individual_order(payload: SellIndividualPayload):
         await approved_signal_queue.put(approved_signal_data)
         _logger.info(f"Sell signal for {normalised_ticker} added to approved_signal_queue.")
         
-        # Update shared_state['sell_all_accumulator'] - this ticker was sold individually
-        # shared_state['sell_all_accumulator'].add(normalised_ticker) # Old way
-        shared_state['sell_all_accumulator'][normalised_ticker] = time.time() # New way, mark as "recent"
-        
-        # Broadcast updated sell_all_accumulator
+        # Broadcast updated sell_all list (now shows open positions)
         sell_all_data = await get_sell_all_list_data()
         await comm_engine.trigger_sell_all_list_update(sell_all_data)
 
@@ -1670,74 +1575,55 @@ async def sell_individual_order(payload: SellIndividualPayload):
 
 @app.post("/admin/order/sell-all", status_code=status.HTTP_200_OK)
 async def sell_all_orders(payload: TokenPayload):
-    """Create and queue sell signals for all tickers in the sell_all_accumulator."""
-    try:
-        token = payload.token
-        if token != FINVIZ_UPDATE_TOKEN:
-            _logger.warning("Invalid token received for /admin/order/sell-all.")
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    """Creates and queues sell signals for all currently open positions from the database."""
+    if payload.token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/order/sell-all.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
 
-        tickers_to_sell = list(shared_state.get('sell_all_accumulator', {}).keys()) # Get keys from dict
+    try:
+        tickers_to_sell = await db_manager.get_all_open_positions_tickers()
         
         if not tickers_to_sell:
-            return {"message": "No tickers to sell", "tickers_processed": []}
+            return {"message": "No open positions to sell.", "tickers_processed": []}
 
+        _logger.info(f"Initiating SELL ALL for {len(tickers_to_sell)} open positions: {tickers_to_sell}")
+        
         processed_tickers = []
         for ticker in tickers_to_sell:
             try:
-                # Create sell signal
                 signal_to_queue = Signal(
                     ticker=ticker,
                     side='sell',
-                    action='sell',
-                    price=None,
-                    time=datetime.datetime.now(datetime.timezone.utc).isoformat() + 'Z'
+                    action='exit' # Use a consistent action
                 )
-                  # Create signal in database with correct type
+                
                 from database.simple_models import SignalTypeEnum
-                try:
-                    signal_id = await db_manager.create_signal_with_initial_event(signal_to_queue, SignalTypeEnum.SELL_ALL)
-                    _logger.info(f"Sell-all signal created in database with ID: {signal_id}")
-                except Exception as db_error:
-                    _logger.error(f"Error creating sell-all signal in database: {db_error}")
-                    continue
+                await db_manager.create_signal_with_initial_event(signal_to_queue, SignalTypeEnum.SELL_ALL)
                 
-                # Prepare data for approved queue
-                approved_signal_data = {
-                    'signal': signal_to_queue,
-                    'ticker': ticker,
-                    'approved_at': time.time(),
-                    'worker_id': 'admin_sell_all',
-                    'signal_id': signal_to_queue.signal_id
-                }
+                # Manually enqueue to bypass the decision worker's validation logic,
+                # as we've already validated the position exists.
+                await approved_signal_queue.put({
+                    'signal': signal_to_queue, 'ticker': ticker, 'approved_at': time.time(),
+                    'worker_id': 'admin_sell_all', 'signal_id': signal_to_queue.signal_id
+                })
                 
-                # Add to approved queue
-                await approved_signal_queue.put(approved_signal_data)
-                
+                # Mark position as closing immediately
+                await db_manager.mark_position_as_closing(ticker, signal_to_queue.signal_id)
+
                 processed_tickers.append(ticker)
                 _logger.info(f"Sell-all signal queued for {ticker}")
                 
             except Exception as ticker_error:
-                _logger.error(f"Error processing sell signal for {ticker}: {ticker_error}")
+                _logger.error(f"Error processing sell-all signal for {ticker}: {ticker_error}", exc_info=True)
                 continue
         
-        # Clear the accumulator
-        shared_state['sell_all_accumulator'].clear()
-        
-        # Broadcast sell_all_list update
-        sell_all_data = await get_sell_all_list_data()
-        await comm_engine.trigger_sell_all_list_update(sell_all_data)
-        
         return {
-            "message": f"Processed {len(processed_tickers)} sell signals",
+            "message": f"Processed {len(processed_tickers)} sell signals.",
             "tickers_processed": processed_tickers,
             "total_requested": len(tickers_to_sell)
         }
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        _logger.error(f"Error in sell-all operation: {e}")
+        _logger.error(f"Error in sell-all operation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing sell-all: {str(e)}")
 
 # Replaces existing signals-history implementation to provide real data
@@ -2017,58 +1903,16 @@ async def resume_webhook_rate_limiter(payload: dict = Body(...)):
 
 @app.get("/admin/sell-all-queue")
 async def get_sell_all_queue():
-    """Get the current sell-all accumulator list."""
+    """Get the current list of tickers with open positions."""
     try:
-        # tickers_list = list(shared_state.get('sell_all_accumulator', set())) # Old way
-        tickers_list = list(shared_state.get('sell_all_accumulator', {}).keys()) # New way
-        tickers_list.sort()  # Sort alphabetically for consistent display
-        
-        return {
-            "tickers": tickers_list,
-            "count": len(tickers_list),
-            "timestamp": time.time()
-        }
-        
+        data = await get_sell_all_list_data()
+        return data
     except Exception as e:
         _logger.error(f"Error getting sell-all queue: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving sell-all queue: {str(e)}"
+            detail=f"Error retrieving open positions: {str(e)}"
         )
-
-@app.post("/admin/sell-all-queue", status_code=status.HTTP_200_OK)
-async def queue_to_sell_all(payload: dict = Body(...)):
-    """Add a ticker to the sell-all accumulator."""
-    token = payload.get("token")
-    ticker = payload.get("ticker")
-    
-    if token != FINVIZ_UPDATE_TOKEN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
-    
-    if not ticker:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticker is required")
-    
-    try:
-        # Add to sell_all_accumulator
-        normalised_ticker = ticker.strip().upper()
-        # shared_state['sell_all_accumulator'].add(normalised_ticker) # Old way
-        shared_state['sell_all_accumulator'][normalised_ticker] = time.time() # New way
-        
-        _logger.info(f"Ticker {normalised_ticker} added to sell-all accumulator via admin")
-        
-        # Broadcast updated sell_all_list
-        sell_all_data = await get_sell_all_list_data()
-        await comm_engine.trigger_sell_all_list_update(sell_all_data)
-        
-        return {
-            "message": f"Ticker {normalised_ticker} added to sell-all list",
-            "ticker": normalised_ticker,
-            "total_tickers": len(shared_state['sell_all_accumulator'])
-        }
-        
-    except Exception as e:
-        _logger.error(f"Error adding ticker to sell-all accumulator: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.get("/admin/webhook/config")
 async def get_webhook_config():
@@ -2224,27 +2068,6 @@ async def get_finviz_config():
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving finviz config")
 
 # --- Sell All List Management API Endpoints ---
-
-@app.post("/admin/sell-all-queue/clear", status_code=status.HTTP_200_OK)
-async def clear_sell_all_list(payload: TokenPayload):
-    """Clears all tickers from the sell_all_accumulator."""
-    if payload.token != FINVIZ_UPDATE_TOKEN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
-
-    try:
-        accumulator = shared_state.get('sell_all_accumulator', {})
-        count = len(accumulator)
-        accumulator.clear()
-        _logger.info(f"Sell All list cleared manually. Removed {count} tickers.")
-
-        # Broadcast the empty list to all admin clients
-        empty_list_data = await get_sell_all_list_data()  # This will return proper format
-        await comm_engine.trigger_sell_all_list_update(empty_list_data)
-
-        return {"message": f"Successfully cleared {count} tickers from the Sell All list."}
-    except Exception as e:
-        _logger.error(f"Error clearing sell-all list: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/admin/sell-all/config", status_code=status.HTTP_204_NO_CONTENT)
 async def update_sell_all_config(payload: dict = Body(...)):
