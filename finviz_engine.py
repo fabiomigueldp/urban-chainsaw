@@ -528,8 +528,23 @@ class FinvizEngine:
 
         for ticker in new_tickers:
             try:
-                _logger.debug(f"Checking for rejected signals for new ticker: {ticker}")
+                _logger.debug(f"Checking for rejected BUY signals for new ticker: {ticker}")
+                # Only reprocess BUY signals - SELL signals rejected means no position existed
                 rejected_signals_payloads = await db_manager.get_rejected_signals_for_reprocessing(ticker, window_seconds)
+                
+                # Filter to only BUY signals
+                buy_signals = []
+                for signal_data in rejected_signals_payloads:
+                    signal_side = signal_data.get("side", "").lower()
+                    signal_type = signal_data.get("signal_type", "").lower()
+                    
+                    # Check if it's a BUY signal
+                    if signal_side in {"buy", "long", "enter"} or signal_type in {"buy"}:
+                        buy_signals.append(signal_data)
+                    else:
+                        _logger.debug(f"Skipping non-BUY signal {signal_data.get('signal_id')} for reprocessing (side: {signal_side}, type: {signal_type})")
+                
+                rejected_signals_payloads = buy_signals
 
                 if rejected_signals_payloads:
                     _logger.info(f"Found {len(rejected_signals_payloads)} rejected signals for ticker {ticker} to reprocess.")
@@ -547,7 +562,53 @@ class FinvizEngine:
                             _logger.error(f"Failed to re-approve signal {signal_id} in database.")
                             continue
 
-                        # 2. Add to approved_signal_queue for forwarding
+                        # 2. For BUY signals: Open position AND add to forwarding queue
+                        # For SELL signals: Only add to forwarding queue (if position exists)
+                        signal_side = signal_payload_dict.get("side", "").lower()
+                        signal_action = reprocessed_signal.action.lower() if hasattr(reprocessed_signal, 'action') and reprocessed_signal.action else ""
+                        
+                        # Determine if this is a BUY signal
+                        buy_triggers = {"buy", "long", "enter"}
+                        sell_triggers = {"sell", "exit", "close"}
+                        
+                        is_buy_signal = (signal_side in buy_triggers) or (signal_action in buy_triggers)
+                        is_sell_signal = (signal_side in sell_triggers) or (signal_action in sell_triggers)
+                        
+                        if is_buy_signal:
+                            # For BUY signals: Open position (just like _queue_worker does)
+                            try:
+                                await db_manager.open_position(ticker=ticker, entry_signal_id=signal_id)
+                                _logger.info(f"Reprocessing: Position opened for {ticker} (signal {signal_id})")
+                                
+                                # Update sell_all list
+                                from main import get_sell_all_list_data, comm_engine
+                                sell_all_data = await get_sell_all_list_data()
+                                await comm_engine.trigger_sell_all_list_update(sell_all_data)
+                                
+                            except Exception as position_error:
+                                _logger.error(f"Reprocessing: Failed to open position for {ticker}: {position_error}")
+                                continue
+                                
+                        elif is_sell_signal:
+                            # For SELL signals: Check if position exists before reprocessing
+                            position_exists = await db_manager.is_position_open(ticker)
+                            if not position_exists:
+                                _logger.warning(f"Reprocessing: Skipping SELL signal {signal_id} for {ticker} - no open position found")
+                                continue
+                            else:
+                                # Mark position as closing
+                                await db_manager.mark_position_as_closing(ticker, signal_id)
+                                _logger.info(f"Reprocessing: Position marked as closing for {ticker} (signal {signal_id})")
+                                
+                                # Update sell_all list
+                                from main import get_sell_all_list_data, comm_engine
+                                sell_all_data = await get_sell_all_list_data()
+                                await comm_engine.trigger_sell_all_list_update(sell_all_data)
+                        else:
+                            _logger.warning(f"Reprocessing: Unknown signal type for {signal_id} - side: '{signal_side}', action: '{signal_action}'")
+                            continue
+
+                        # 3. Add to approved_signal_queue for forwarding
                         # Reconstruct the Signal object from the stored original_signal dict
                         from models import Signal as SignalPydanticModel
                         try:
@@ -579,15 +640,14 @@ class FinvizEngine:
                         await approved_signal_queue.put(approved_signal_data)
                         _logger.info(f"Signal {signal_id} for {ticker} re-queued for forwarding.")
 
-                        # 3. Update metrics
+                        # 4. Update metrics safely
                         shared_state["signal_metrics"]["signals_approved"] += 1
-                        if shared_state["signal_metrics"]["signals_rejected"] > 0: # Avoid going negative
+                        if shared_state["signal_metrics"]["signals_rejected"] > 0:
                             shared_state["signal_metrics"]["signals_rejected"] -= 1
+                        else:
+                            _logger.warning(f"Reprocessing: Cannot decrement signals_rejected - already at 0")
 
-                        # Broadcast updated metrics (consider if this should be done after all reprocessing or per signal)
-                        # from comm_engine import comm_engine
-                        # from main import get_current_metrics
-                        # await comm_engine.broadcast("metrics_update", get_current_metrics())
+                        _logger.info(f"✅ Reprocessing: Signal {signal_id} for {ticker} successfully reprocessed and queued for forwarding")
                 else:
                     _logger.debug(f"No rejected signals found for ticker {ticker} in the last {window_seconds}s.")
             except Exception as e:
