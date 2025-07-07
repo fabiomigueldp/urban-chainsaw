@@ -2,6 +2,10 @@
 -- HYBRID APPROACH: Enums in Python, Strings in Database
 -- Simple and efficient schema for maximum performance
 
+-- Create database if it doesn't exist
+SELECT 'CREATE DATABASE trading_signals'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'trading_signals')\gexec
+
 -- Ensure we're using the correct database
 \c trading_signals;
 

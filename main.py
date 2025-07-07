@@ -274,8 +274,8 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
             sell_triggers = {"sell", "exit", "close"}
             buy_triggers = {"buy", "long", "enter"}
             
-            sig_action = getattr(signal, 'action', '' or '').lower()
-            sig_side = getattr(signal, 'side', '' or '').lower()
+            sig_action = (getattr(signal, 'action', '') or '').lower()
+            sig_side = (getattr(signal, 'side', '') or '').lower()
 
             if sig_action in sell_triggers or sig_side in sell_triggers:
                 action_type = "SELL"
@@ -414,8 +414,8 @@ async def _forwarding_worker(worker_id: int) -> None:
                     
                     # --- INSERT NEW CODE BLOCK HERE ---
                     # After a successful forward, check if it was a sell signal to close the position
-                    sig_action = getattr(signal, 'action', '' or '').lower()
-                    sig_side = getattr(signal, 'side', '' or '').lower()
+                    sig_action = (getattr(signal, 'action', '') or '').lower()
+                    sig_side = (getattr(signal, 'side', '') or '').lower()
                     sell_triggers = {"sell", "exit", "close"}
                     if sig_action in sell_triggers or sig_side in sell_triggers:
                         closed = await db_manager.close_position(exit_signal_id=signal_id)
