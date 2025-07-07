@@ -1120,9 +1120,11 @@ class DBManager:
             return count > 0
 
     async def get_all_open_positions_tickers(self) -> List[str]:
-        """Returns a list of all tickers that currently have an 'open' position."""
+        """Returns a list of all tickers that currently have an 'open' or 'closing' position."""
         async with self.get_session() as session:
-            stmt = select(Position.ticker).where(Position.status == PositionStatusEnum.OPEN.value).distinct()
+            stmt = select(Position.ticker).where(
+                Position.status.in_([PositionStatusEnum.OPEN.value, PositionStatusEnum.CLOSING.value])
+            ).distinct()
             result = await session.execute(stmt)
             tickers = result.scalars().all()
             return tickers

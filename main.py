@@ -316,8 +316,14 @@ async def _queue_worker(worker_id: int, get_tickers_func: Callable) -> None:
                 
                 if action_type == "BUY":
                     await db_manager.open_position(ticker=normalised_ticker, entry_signal_id=signal_id)
+                    # Broadcast updated sell_all list after position is opened
+                    sell_all_data = await get_sell_all_list_data()
+                    await comm_engine.trigger_sell_all_list_update(sell_all_data)
                 elif action_type == "SELL":
                     await db_manager.mark_position_as_closing(ticker=normalised_ticker, exit_signal_id=signal_id)
+                    # Broadcast updated sell_all list after position is marked as closing
+                    sell_all_data = await get_sell_all_list_data()
+                    await comm_engine.trigger_sell_all_list_update(sell_all_data)
 
                 await approved_signal_queue.put({
                     'signal': signal, 'ticker': normalised_ticker, 'approved_at': time.time(),
@@ -412,16 +418,40 @@ async def _forwarding_worker(worker_id: int) -> None:
                     )
                     response.raise_for_status()
                     
-                    # --- INSERT NEW CODE BLOCK HERE ---
+                    # --- IMPROVED SELL DETECTION LOGIC ---
                     # After a successful forward, check if it was a sell signal to close the position
                     sig_action = (getattr(signal, 'action', '') or '').lower()
                     sig_side = (getattr(signal, 'side', '') or '').lower()
-                    sell_triggers = {"sell", "exit", "close"}
-                    if sig_action in sell_triggers or sig_side in sell_triggers:
+                    
+                    # Log signal details for debugging
+                    _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Signal details - side: '{sig_side}', action: '{sig_action}'")
+                    
+                    # More precise SELL detection - prioritize 'side' over 'action'
+                    is_sell_signal = False
+                    if sig_side in {"sell"}:
+                        is_sell_signal = True
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Detected as SELL signal based on side: '{sig_side}'")
+                    elif sig_side in {"buy", "long", "enter"}:
+                        is_sell_signal = False
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Detected as BUY signal based on side: '{sig_side}' - NO position closing needed")
+                    elif sig_action in {"sell", "exit", "close"}:
+                        is_sell_signal = True
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Detected as SELL signal based on action: '{sig_action}'")
+                    else:
+                        _logger.warning(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Ambiguous signal type - side: '{sig_side}', action: '{sig_action}' - assuming BUY (no position closing)")
+                    
+                    if is_sell_signal:
                         closed = await db_manager.close_position(exit_signal_id=signal_id)
-                        if not closed:
+                        if closed:
+                            # Broadcast updated sell_all list after position is closed
+                            sell_all_data = await get_sell_all_list_data()
+                            await comm_engine.trigger_sell_all_list_update(sell_all_data)
+                            _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Position closed and Sell All list updated.")
+                        else:
                              _logger.warning(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] A sell signal was forwarded, but no corresponding 'closing' position was found in DB to finalize.")
-                    # --- END OF NEW CODE BLOCK ---
+                    else:
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] BUY signal forwarded - position remains OPEN")
+                    # --- END OF IMPROVED LOGIC ---
                     
                     _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Signal forwarded successfully - HTTP {response.status_code}")
                     
