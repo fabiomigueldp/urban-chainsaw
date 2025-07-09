@@ -11,6 +11,8 @@
 
 import logging
 import json
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime, timedelta
@@ -399,22 +401,28 @@ class DBManager:
             }
 
     async def clear_all_data(self) -> Dict[str, Any]:
-        """Completely clears all signals and events from the database. DESTRUCTIVE OPERATION!"""
+        """Completely clears all signals, events and positions from the database. DESTRUCTIVE OPERATION!"""
         async with self.get_session() as session:
-            # First delete all events (due to foreign key constraints)
+            # 1. First delete all events (due to foreign key constraints)
             events_delete_stmt = text("DELETE FROM signal_events")
             events_result = await session.execute(events_delete_stmt)
             deleted_events = events_result.rowcount
             
-            # Then delete all signals
+            # 2. Delete positions (which reference signals)
+            positions_delete_stmt = text("DELETE FROM positions")
+            positions_result = await session.execute(positions_delete_stmt)
+            deleted_positions = positions_result.rowcount
+            
+            # 3. Now we can safely delete signals without violating constraints
             signals_delete_stmt = text("DELETE FROM signals")
             signals_result = await session.execute(signals_delete_stmt)
             deleted_signals = signals_result.rowcount
 
-            _logger.warning(f"Database completely cleared. Deleted {deleted_signals} signals and {deleted_events} events.")
+            _logger.warning(f"Database completely cleared. Deleted {deleted_signals} signals, {deleted_events} events, and {deleted_positions} positions.")
             return {
                 "deleted_signals_count": deleted_signals,
                 "deleted_events_count": deleted_events,
+                "deleted_positions_count": deleted_positions,
                 "operation": "clear_all_data"
             }
 
@@ -1128,6 +1136,153 @@ class DBManager:
             result = await session.execute(stmt)
             tickers = result.scalars().all()
             return tickers
+
+    async def create_manual_position(self, ticker: str, source: str = "manual") -> int:
+        """Cria posição fictícia para ticker adicionado manualmente à sell all list."""
+        async with self.get_session() as session:
+            # Criar signal fictício primeiro
+            manual_signal = Signal(
+                signal_id=uuid.uuid4(),
+                ticker=ticker.upper(),
+                normalised_ticker=ticker.upper(),
+                side="SELL",
+                price=0.0,  # Fictício
+                status=SignalStatusEnum.APPROVED.value,
+                signal_type="manual_sell_entry",
+                original_signal={"ticker": ticker.upper(), "manual": True, "source": source},
+                processing_time_ms=0
+            )
+            session.add(manual_signal)
+            await session.flush()
+            
+            # Criar posição fictícia
+            manual_position = Position(
+                ticker=ticker.upper(),
+                status=PositionStatusEnum.OPEN.value,
+                entry_signal_id=manual_signal.signal_id,
+                opened_at=datetime.utcnow()
+            )
+            session.add(manual_position)
+            await session.flush()
+            
+            _logger.info(f"Created manual position for ticker {ticker} with signal_id {manual_signal.signal_id}")
+            return manual_position.id
+
+    async def get_positions_with_details(self, status_filter=None, ticker_filter=None):
+        """Retorna posições com detalhes completos para interface de ordens."""
+        async with self.get_session() as session:
+            query = select(
+                Position.id,
+                Position.ticker,
+                Position.status,
+                Position.opened_at,
+                Position.closed_at,
+                Signal.price.label('entry_price'),
+                func.extract('epoch', Position.closed_at - Position.opened_at).label('duration_seconds')
+            ).join(
+                Signal, Position.entry_signal_id == Signal.signal_id
+            )
+            
+            if status_filter and status_filter != 'all':
+                query = query.where(Position.status == status_filter)
+            
+            if ticker_filter:
+                query = query.where(Position.ticker.ilike(f'%{ticker_filter}%'))
+            
+            result = await session.execute(query.order_by(Position.opened_at.desc()))
+            
+            orders = []
+            for row in result:
+                duration_str = "—"
+                if row.duration_seconds:
+                    hours = int(row.duration_seconds // 3600)
+                    minutes = int((row.duration_seconds % 3600) // 60)
+                    duration_str = f"{hours}h {minutes}m"
+                
+                orders.append({
+                    "id": row.id,
+                    "ticker": row.ticker,
+                    "status": row.status,
+                    "opened_at": row.opened_at.isoformat() if row.opened_at else None,
+                    "closed_at": row.closed_at.isoformat() if row.closed_at else None,
+                    "entry_price": float(row.entry_price) if row.entry_price else 0.0,
+                    "duration": duration_str,
+                    "duration_seconds": row.duration_seconds or 0
+                })
+            
+            return orders
+    
+    async def get_positions_statistics(self):
+        """Retorna estatísticas em tempo real das posições."""
+        async with self.get_session() as session:
+            # Contar por status
+            status_counts = await session.execute(
+                select(
+                    Position.status,
+                    func.count(Position.id).label('count')
+                ).group_by(Position.status)
+            )
+            
+            stats = {"open": 0, "closing": 0, "closed": 0}
+            for row in status_counts:
+                stats[row.status] = row.count
+            
+            # Posições fechadas hoje
+            today = datetime.utcnow().date()
+            closed_today = await session.execute(
+                select(func.count(Position.id)).where(
+                    and_(
+                        Position.status == PositionStatusEnum.CLOSED.value,
+                        func.date(Position.closed_at) == today
+                    )
+                )
+            )
+            stats["closed_today"] = closed_today.scalar() or 0
+            
+            return {
+                "stats": stats,
+                "timestamp": time.time()
+            }
+    
+    async def close_position_manually(self, position_id: int):
+        """Fecha posição manualmente."""
+        async with self.get_session() as session:
+            # Buscar a posição
+            position = await session.get(Position, position_id)
+            if not position:
+                raise ValueError(f"Position {position_id} not found")
+            
+            if position.status == PositionStatusEnum.CLOSED.value:
+                raise ValueError(f"Position {position_id} is already closed")
+            
+            # Criar signal de fechamento
+            exit_signal = Signal(
+                signal_id=uuid.uuid4(),
+                ticker=position.ticker,
+                normalised_ticker=position.ticker,
+                side="SELL",
+                price=0.0,  # Manual close
+                status=SignalStatusEnum.APPROVED.value,
+                signal_type="manual_close",
+                original_signal={"ticker": position.ticker, "manual_close": True, "position_id": position_id},
+                processing_time_ms=0
+            )
+            session.add(exit_signal)
+            await session.flush()
+            
+            # Atualizar posição
+            position.status = PositionStatusEnum.CLOSED.value
+            position.closed_at = datetime.utcnow()
+            position.exit_signal_id = exit_signal.signal_id
+            
+            _logger.info(f"Manually closed position {position_id} for ticker {position.ticker}")
+            
+            return {
+                "position_id": position_id,
+                "ticker": position.ticker,
+                "status": "closed",
+                "closed_at": position.closed_at.isoformat()
+            }
 
 # Global Singleton Instance - to be imported throughout the application
 db_manager = DBManager()

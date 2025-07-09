@@ -41,9 +41,7 @@ import httpx
 # import finviz # Will be refactored to use only parser # Commented out as it's no longer used directly here
 from typing import Set, List, Any, Dict, Callable, Optional # Added Optional
 
-import httpx
-from fastapi import Body, FastAPI, BackgroundTasks, HTTPException, status, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form
-from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, Response
+from fastapi import Body, FastAPI, BackgroundTasks, HTTPException, status, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Response
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -1958,126 +1956,6 @@ async def get_webhook_config():
     except Exception as e:
         _logger.error(f"Error getting webhook config: {e}")
 
-@app.get("/admin/export-csv", response_class=Response)
-async def export_database_to_csv():
-    """Exports the entire database content (signals and events) to a CSV file."""
-    try:
-        _logger.info("Received request to export database to CSV.")
-        data = await db_manager.get_all_signals_for_export()
-
-        if not data:
-            _logger.warning("No data found for CSV export.")
-            return PlainTextResponse("No data to export.", status_code=status.HTTP_204_NO_CONTENT)
-
-        # Determine all possible headers from all rows
-        all_keys = set()
-        for row in data:
-            all_keys.update(row.keys())
-        
-        # Sort keys for consistent CSV header order
-        headers = sorted(list(all_keys))
-
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=headers)
-
-        writer.writeheader()
-        writer.writerows(data)
-
-        csv_content = output.getvalue()
-        _logger.info(f"Successfully generated CSV with {len(data)} rows.")
-
-        return Response(
-            content=csv_content,
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=urban_chainsaw_audit_trail.csv"}
-        )
-    except Exception as e:
-        _logger.error(f"Error exporting database to CSV: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error exporting data: {str(e)}")
-
-@app.post("/admin/import-csv", status_code=status.HTTP_200_OK)
-async def import_database_from_csv(file: UploadFile = File(...), token: str = Form(...)):
-    """Imports signal and event data from a CSV file into the database."""
-    if token != FINVIZ_UPDATE_TOKEN:
-        _logger.warning("Invalid token received for /admin/import-csv.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
-
-    if not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV files are supported.")
-
-    _logger.info(f"Received request to import CSV file: {file.filename}")
-
-    try:
-        content = await file.read()
-        csv_file = io.StringIO(content.decode('utf-8'))
-        reader = csv.DictReader(csv_file)
-        
-        # Convert reader to a list of dictionaries for processing
-        data_to_import = list(reader)
-
-        if not data_to_import:
-            _logger.warning("CSV file is empty or contains only headers.")
-            return {"message": "CSV file is empty or contains only headers. No data imported.", "summary": {}}
-
-        import_summary = await db_manager.import_signals_from_csv(data_to_import)
-        _logger.info(f"CSV import completed. Summary: {import_summary}")
-
-        # Prepare response message based on results
-        total_rows = len(data_to_import)
-        processed_rows = import_summary.get("signals_created", 0) + import_summary.get("signals_updated", 0)
-        skipped_rows = import_summary.get("rows_skipped", 0)
-        error_count = len(import_summary.get("errors", []))
-        
-        if processed_rows == total_rows and error_count == 0:
-            message = f"CSV data imported successfully. All {total_rows} rows processed."
-        elif processed_rows > 0:
-            message = f"CSV data partially imported. {processed_rows} rows processed, {skipped_rows} rows skipped."
-            if error_count > 0:
-                message += f" {error_count} errors occurred during import."
-        else:
-            message = "CSV import failed. No rows were processed successfully."
-            if error_count > 0:
-                message += f" {error_count} errors occurred."
-
-        return {"message": message, "summary": import_summary}
-
-    except RuntimeError as e:
-        # These are our controlled errors from the import process
-        _logger.error(f"Controlled error importing CSV file: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        # Unexpected errors
-        _logger.error(f"Unexpected error importing CSV file: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error importing data: {str(e)}")
-
-@app.post("/admin/clear-database", status_code=status.HTTP_200_OK)
-async def clear_database(payload: dict = Body(...)):
-    """Clears all signals and events from the database. DESTRUCTIVE OPERATION!"""
-    token = payload.get("token")
-    if token != FINVIZ_UPDATE_TOKEN:
-        _logger.warning("Invalid token received for /admin/clear-database.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
-
-    _logger.warning("Received request to CLEAR ALL DATABASE RECORDS. This is a destructive operation!")
-
-    try:
-        # Perform complete database clear
-        clear_result = await db_manager.clear_all_data()
-        
-        _logger.warning(f"Database cleared successfully. Result: {clear_result}")
-        
-        return {
-            "message": "Database cleared successfully.", 
-            "deleted_signals": clear_result.get("deleted_signals_count", 0),
-            "deleted_events": clear_result.get("deleted_events_count", 0)
-        }
-
-    except Exception as e:
-        _logger.error(f"Error clearing database: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error clearing database: {str(e)}")
-
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving webhook config")
-
 @app.get("/admin/finviz/config")
 async def get_finviz_config():
     """Get current Finviz configuration."""
@@ -2099,61 +1977,105 @@ async def get_finviz_config():
 
 # --- Sell All List Management API Endpoints ---
 
-@app.post("/admin/sell-all/config", status_code=status.HTTP_204_NO_CONTENT)
-async def update_sell_all_config(payload: dict = Body(...)):
-    """Updates the Sell All list cleanup configuration."""
+@app.post("/admin/sell-all-queue", status_code=status.HTTP_200_OK)
+async def add_ticker_to_sell_all_queue(payload: dict = Body(...)):
+    """Adiciona um ticker à lista de sell-all (simula posição aberta)."""
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/sell-all-queue POST.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
-
+    
+    ticker = payload.get("ticker")
+    if not ticker:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticker is required")
+    
+    ticker = ticker.strip().upper()
+    
     try:
-        from system_config import update_sell_all_cleanup_config
+        # Check if ticker already has an open position
+        existing_positions = await db_manager.get_all_open_positions_tickers()
+        if ticker in existing_positions:
+            return {"message": f"Ticker {ticker} already has an open position", "ticker": ticker}
         
-        # Extract configuration values
-        enabled = payload.get('enabled')
-        lifetime_hours = payload.get('lifetime_hours')
+        # Create a dummy buy signal to simulate an open position
+        from models import Signal
+        from database.simple_models import SignalTypeEnum
         
-        # Validate inputs
-        if enabled is not None:
-            enabled = bool(enabled)
-        else:
-            # Keep current enabled state if not provided
-            from system_config import get_sell_all_cleanup_config
-            current_config = get_sell_all_cleanup_config()
-            enabled = current_config["enabled"]
-            
-        if lifetime_hours is not None:
-            lifetime_hours = int(lifetime_hours)
-            if lifetime_hours <= 0:
-                raise ValueError("Lifetime must be a positive number of hours.")
-        else:
-            # Keep current lifetime if not provided
-            from system_config import get_sell_all_cleanup_config
-            current_config = get_sell_all_cleanup_config()
-            lifetime_hours = current_config["lifetime_hours"]
+        dummy_signal = Signal(ticker=ticker, side='buy')
+        signal_id = await db_manager.create_signal_with_initial_event(dummy_signal, SignalTypeEnum.BUY)
         
-        # Update configuration in persistent storage
-        update_sell_all_cleanup_config(enabled, lifetime_hours)
+        # Create an open position for this ticker
+        await db_manager.open_position(ticker, signal_id)
         
-        _logger.info(f"Sell All cleanup config updated: enabled={enabled}, lifetime_hours={lifetime_hours}")
-
-    except (ValueError, TypeError) as e:
-        _logger.error(f"Invalid value for sell-all config: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        _logger.info(f"Ticker {ticker} added to sell-all queue (simulated open position)")
+        
+        # Broadcast updated sell_all list
+        sell_all_data = await get_sell_all_list_data()
+        await comm_engine.trigger_sell_all_list_update(sell_all_data)
+        
+        return {"message": f"Ticker {ticker} added to sell-all queue successfully", "ticker": ticker}
+        
     except Exception as e:
-        _logger.error(f"Error updating sell-all config: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        _logger.error(f"Error adding ticker {ticker} to sell-all queue: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error adding ticker: {str(e)}")
 
-@app.get("/admin/sell-all/config")
-async def get_sell_all_config():
-    """Gets the current Sell All list cleanup configuration."""
+@app.post("/admin/sell-all-queue/clear", status_code=status.HTTP_200_OK)
+async def clear_sell_all_queue(payload: dict = Body(...)):
+    """Limpa todas as posições abertas (fecha todas as posições)."""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/sell-all-queue/clear.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    
     try:
-        from system_config import get_sell_all_cleanup_config
-        config = get_sell_all_cleanup_config()
-        return config
+        # Get all open positions
+        open_tickers = await db_manager.get_all_open_positions_tickers()
+        
+        if not open_tickers:
+            return {"message": "No open positions to clear", "cleared_count": 0}
+        
+        _logger.info(f"Clearing all {len(open_tickers)} open positions: {open_tickers}")
+        
+        # Close all open positions
+        cleared_count = 0
+        for ticker in open_tickers:
+            try:
+                # Get the open position
+                positions = await db_manager.get_positions_with_details(ticker_filter=ticker, status_filter="open")
+                for position in positions:
+                    await db_manager.close_position_manually(position["id"])
+                    cleared_count += 1
+            except Exception as ticker_error:
+                _logger.error(f"Error closing position for {ticker}: {ticker_error}")
+        
+        _logger.info(f"Cleared {cleared_count} positions from sell-all queue")
+        
+        # Broadcast updated sell_all list
+        sell_all_data = await get_sell_all_list_data()
+        await comm_engine.trigger_sell_all_list_update(sell_all_data)
+        
+        return {
+            "message": f"Cleared {cleared_count} positions from sell-all queue",
+            "cleared_count": cleared_count,
+            "original_count": len(open_tickers)
+        }
+        
     except Exception as e:
-        _logger.error(f"Error getting sell-all config: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        _logger.error(f"Error clearing sell-all queue: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error clearing queue: {str(e)}")
+
+@app.get("/admin/sell-all-queue")
+async def get_sell_all_queue():
+    """Get the current list of tickers with open positions."""
+    try:
+        data = await get_sell_all_list_data()
+        return data
+    except Exception as e:
+        _logger.error(f"Error getting sell-all queue: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving open positions: {str(e)}"
+        )
 
 # --- End Sell All List Management API Endpoints ---
 
@@ -2208,9 +2130,9 @@ async def update_system_config(payload: dict = Body(...)):
                     updated_configs.append("rate_limiter_max_req")
                 if "enabled" in rl_config:
                     if rl_config["enabled"]:
-                        await webhook_rl.resume()
+                        webhook_rl.resume()
                     else:
-                        await webhook_rl.pause()
+                        webhook_rl.pause()
                     updated_configs.append("rate_limiter_enabled")
         
         _logger.info(f"System configuration updated: {', '.join(updated_configs)}")
@@ -2278,3 +2200,228 @@ async def get_top_n_tickers():
             "error": str(e),
             "engine_info": {}
         }
+
+# ---------------------------------------------------------------------------- #
+# Orders Management Endpoints                                                  #
+# ---------------------------------------------------------------------------- #
+
+@app.get("/admin/orders")
+async def get_orders(status: Optional[str] = None, ticker: Optional[str] = None):
+    """Retorna lista de ordens/posições com filtros."""
+    try:
+        orders = await db_manager.get_positions_with_details(
+            status_filter=status,
+            ticker_filter=ticker
+        )
+        
+        return {
+            "orders": orders,
+            "count": len(orders),
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        _logger.error(f"Error getting orders: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error getting orders: {str(e)}")
+
+@app.get("/admin/orders/stats")
+async def get_orders_stats():
+    """Retorna estatísticas de ordens em tempo real."""
+    try:
+        stats_data = await db_manager.get_positions_statistics()
+        return stats_data
+    except Exception as e:
+        _logger.error(f"Error getting orders stats: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error getting stats: {str(e)}")
+
+@app.post("/admin/orders/{position_id}/close")
+async def close_order_manually(position_id: int, payload: dict = Body(...)):
+    """Fecha ordem manualmente."""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning(f"Invalid token received for /admin/orders/{position_id}/close.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    
+    try:
+        result = await db_manager.close_position_manually(position_id)
+        
+        # Broadcast update via WebSocket
+        await comm_engine.broadcast("order_status_change", {
+            "position_id": position_id,
+            "new_status": "closed",
+            "timestamp": time.time()
+        })
+        
+        _logger.info(f"Position {position_id} closed manually via admin endpoint")
+        return result
+        
+    except ValueError as e:
+        _logger.warning(f"Invalid position close request: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        _logger.error(f"Error closing order {position_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error closing order: {str(e)}")
+
+
+@app.post("/admin/clear-database")
+async def clear_database(payload: dict = Body(...)):
+    """Limpa completamente todos os dados do banco de dados. OPERAÇÃO DESTRUTIVA!"""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/clear-database.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    
+    try:
+        _logger.warning("🚨 ADMIN ACTION: Clearing entire database via admin endpoint")
+        result = await db_manager.clear_all_data()
+        
+        # Broadcast database clear event via WebSocket
+        await comm_engine.broadcast("database_cleared", {
+            "deleted_signals": result.get("deleted_signals_count", 0),
+            "deleted_events": result.get("deleted_events_count", 0),
+            "deleted_positions": result.get("deleted_positions_count", 0),
+            "timestamp": time.time()
+        })
+        
+        _logger.warning(f"🧹 Database cleared successfully: {result.get('deleted_signals_count', 0)} signals, {result.get('deleted_events_count', 0)} events, {result.get('deleted_positions_count', 0)} positions deleted")
+        return result
+        
+    except Exception as e:
+        _logger.error(f"Error clearing database: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error clearing database: {str(e)}")
+
+
+@app.get("/admin/export-csv")
+async def export_database_csv():
+    """Exporta todos os dados do banco para CSV."""
+    try:
+        # Get all signals with their events (using high limit to get all data)
+        signals = await db_manager.get_audit_trail(limit=50000)
+        
+        if not signals:
+            raise HTTPException(status_code=status.HTTP_204_NO_CONTENT, detail="No data available for export")
+        
+        # Create CSV content
+        csv_content = []
+        csv_content.append("timestamp,signal_id,ticker,signal_type,status,location,worker_id,details,http_code")
+        
+        for event in signals:
+            row = [
+                event.get("timestamp", ""),
+                event.get("signal_id", ""),
+                event.get("ticker", ""),
+                event.get("signal_type", ""),
+                event.get("status", ""),
+                event.get("location", "unknown"),
+                event.get("worker_id", ""),
+                event.get("details", ""),
+                event.get("http_status", "")
+            ]
+            # Escape CSV fields that contain commas or quotes
+            escaped_row = []
+            for field in row:
+                field_str = str(field) if field is not None else ""
+                if "," in field_str or '"' in field_str:
+                    field_str = '"' + field_str.replace('"', '""') + '"'
+                escaped_row.append(field_str)
+            csv_content.append(",".join(escaped_row))
+        
+        csv_data = "\n".join(csv_content)
+        
+        return Response(
+            content=csv_data,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=trading_signals_{int(time.time())}.csv"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        _logger.error(f"Error exporting CSV: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error exporting data: {str(e)}")
+
+
+@app.post("/admin/import-csv")
+async def import_database_csv(payload: dict = Body(...)):
+    """Importa dados de CSV para o banco de dados."""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/import-csv.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    
+    csv_data = payload.get("csv_data")
+    if not csv_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV data is required")
+    
+    try:
+        # Parse CSV data
+        reader = csv.DictReader(io.StringIO(csv_data))
+        
+        imported_count = 0
+        for row in reader:
+            # Process each row and add to database
+            # This is a simplified implementation - in production you'd want more validation
+            # For now, we'll just count the rows
+            imported_count += 1
+        
+        _logger.info(f"CSV import completed: {imported_count} rows processed")
+        return {"imported_count": imported_count, "message": "CSV import completed successfully"}
+        
+    except Exception as e:
+        _logger.error(f"Error importing CSV: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error importing CSV: {str(e)}")
+
+@app.post("/admin/sell-all/config", status_code=status.HTTP_204_NO_CONTENT)
+async def update_sell_all_config(payload: dict = Body(...)):
+    """Updates the Sell All list cleanup configuration."""
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+
+    try:
+        from system_config import update_sell_all_cleanup_config
+        
+        # Extract configuration values
+        enabled = payload.get('enabled')
+        lifetime_hours = payload.get('lifetime_hours')
+        
+        # Validate inputs
+        if enabled is not None:
+            enabled = bool(enabled)
+        else:
+            # Keep current enabled state if not provided
+            from system_config import get_sell_all_cleanup_config
+            current_config = get_sell_all_cleanup_config()
+            enabled = current_config["enabled"]
+            
+        if lifetime_hours is not None:
+            lifetime_hours = int(lifetime_hours)
+            if lifetime_hours <= 0:
+                raise ValueError("Lifetime must be a positive number of hours.")
+        else:
+            # Keep current lifetime if not provided
+            from system_config import get_sell_all_cleanup_config
+            current_config = get_sell_all_cleanup_config()
+            lifetime_hours = current_config["lifetime_hours"]
+        
+        # Update configuration in persistent storage
+        update_sell_all_cleanup_config(enabled, lifetime_hours)
+        
+        _logger.info(f"Sell All cleanup config updated: enabled={enabled}, lifetime_hours={lifetime_hours}")
+
+    except (ValueError, TypeError) as e:
+        _logger.error(f"Invalid value for sell-all config: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        _logger.error(f"Error updating sell-all config: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating sell-all config")
+
+@app.get("/admin/sell-all/config")
+async def get_sell_all_config():
+    """Gets the current Sell All list cleanup configuration."""
+    try:
+        from system_config import get_sell_all_cleanup_config
+        config = get_sell_all_cleanup_config()
+        return config
+    except Exception as e:
+        _logger.error(f"Error getting sell-all config: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

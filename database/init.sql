@@ -1,6 +1,6 @@
 -- PostgreSQL initialization script for Trading Signal Processor
 -- HYBRID APPROACH: Enums in Python, Strings in Database
--- Simple and efficient schema for maximum performance
+-- Simple an-- Initialization loga for maximum performance
 
 -- Create database if it doesn't exist
 SELECT 'CREATE DATABASE trading_signals'
@@ -135,20 +135,10 @@ COMMENT ON TABLE signal_events IS 'Audit events - detailed lifecycle tracking';
 COMMENT ON COLUMN signal_events.status IS 'Event status as string (enum in Python)';
 
 -- =============================================================================
--- TEST DATA (OPTIONAL)
+-- NO TEST DATA - PRODUCTION READY
 -- =============================================================================
 
--- Insert test signal if no data exists
-INSERT INTO signals (signal_id, ticker, normalised_ticker, side, price, status, original_signal)
-SELECT 
-    'test-init-' || uuid_generate_v4()::text,
-    'AAPL',
-    'AAPL', 
-    'BUY',
-    150.0,
-    'received',
-    '{"ticker": "AAPL", "side": "BUY", "price": 150.0, "test": true}'::jsonb
-WHERE NOT EXISTS (SELECT 1 FROM signals LIMIT 1);
+-- No test data inserted - clean start for production use
 
 -- Initialization log
 DO $$

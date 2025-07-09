@@ -460,6 +460,86 @@ def build_and_start_fast(use_sudo: bool = False) -> bool:
         diagnose_startup_failure()
         return False
 
+def auto_fix_common_issues(use_sudo: bool = False) -> bool:
+    """Automatically fixes common deployment issues."""
+    print_step("🔧 Detecting and fixing common issues...")
+    
+    issues_fixed = 0
+    
+    try:
+        # 1. Check if containers are stuck
+        print("🔍 Checking container status...")
+        result = run_command(["docker", "compose", "ps"], capture_output=True, check=False)
+        if "Exited" in result.stdout or "Error" in result.stdout:
+            print_warning("⚠️ Found problematic containers, cleaning up...")
+            run_command(["docker", "compose", "down"], use_sudo=use_sudo, check=False)
+            run_command(["docker", "compose", "up", "-d"], use_sudo=use_sudo, check=False)
+            issues_fixed += 1
+            print_success("✅ Restarted containers")
+        
+        # 2. Check database connectivity
+        print("🔍 Testing database connectivity...")
+        db_result = run_command([
+            "docker", "compose", "exec", "-T", "postgres", 
+            "pg_isready", "-U", "postgres", "-d", "trading_signals"
+        ], capture_output=True, check=False)
+        
+        if db_result.returncode != 0:
+            print_warning("⚠️ Database not ready, waiting...")
+            time.sleep(10)
+            # Test again
+            db_result = run_command([
+                "docker", "compose", "exec", "-T", "postgres", 
+                "pg_isready", "-U", "postgres", "-d", "trading_signals"
+            ], capture_output=True, check=False)
+            
+            if db_result.returncode == 0:
+                issues_fixed += 1
+                print_success("✅ Database connectivity restored")
+        
+        # 3. Check application health
+        print("🔍 Testing application health...")
+        try:
+            time.sleep(5)  # Wait a bit for application to start
+            import urllib.request
+            response = urllib.request.urlopen("http://localhost:80/health", timeout=10)
+            if response.status == 200:
+                print_success("✅ Application is healthy")
+            else:
+                print_warning("⚠️ Application returned non-200 status")
+        except Exception:
+            print_warning("⚠️ Application health check failed, restarting...")
+            run_command(["docker", "compose", "restart", "trading-signal-processor"], use_sudo=use_sudo, check=False)
+            issues_fixed += 1
+        
+        # 4. Check and fix permissions
+        print("🔍 Checking file permissions...")
+        try:
+            config_files = ['finviz_config.json', 'webhook_config.json', 'system_config.json']
+            for config_file in config_files:
+                if not os.path.exists(config_file):
+                    with open(config_file, 'w') as f:
+                        f.write('{}')
+                    print_success(f"✅ Created missing config file: {config_file}")
+                    issues_fixed += 1
+        except Exception as e:
+            print_warning(f"⚠️ Permission fix failed: {e}")
+        
+        print_step(f"🎯 Auto-fix summary: {issues_fixed} issues detected and fixed")
+        
+        if issues_fixed > 0:
+            print_success("🎉 Auto-fix completed! Testing final status...")
+            time.sleep(5)
+            show_status()
+            return True
+        else:
+            print_success("✅ No issues detected - system appears healthy")
+            return True
+            
+    except Exception as e:
+        print_error(f"❌ Auto-fix failed: {e}")
+        return False
+
 def diagnose_startup_failure() -> None:
     """Provides detailed diagnostics when startup fails."""
     print_step("🔍 Analyzing startup failure...")
@@ -470,15 +550,23 @@ def diagnose_startup_failure() -> None:
         print("Container Status:")
         print(result.stdout)
         
-        # Check database container specifically
-        result = run_command(["docker", "ps", "--filter", "name=trading-db", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"], capture_output=True, check=False)
-        print("\nDatabase Container Details:")
-        print(result.stdout)
-        
-        # Show database logs
+        # Check for specific error patterns in database logs
         print("\n📋 Recent Database Logs:")
         result = run_command(["docker", "compose", "logs", "--tail", "30", "postgres"], capture_output=True, check=False)
-        print(result.stdout)
+        db_logs = result.stdout
+        print(db_logs)
+        
+        # Check for common database issues
+        if "ERROR:" in db_logs:
+            print_warning("⚠️ Database errors detected:")
+            error_lines = [line for line in db_logs.split('\n') if 'ERROR:' in line]
+            for error in error_lines[-3:]:  # Show last 3 errors
+                print(f"   {error}")
+            
+            # Specific fixes for common issues
+            if "column" in db_logs and "type uuid" in db_logs:
+                print_warning("🔧 Detected UUID type mismatch in database initialization")
+                print("   This is likely a database schema issue that can be fixed.")
         
         # Show application logs
         print("\n📋 Recent Application Logs:")
@@ -494,6 +582,13 @@ def diagnose_startup_failure() -> None:
         result = run_command(["docker", "network", "ls", "--filter", "name=trading-network"], capture_output=True, check=False)
         print("\n🌐 Network Status:")
         print(result.stdout)
+        
+        # Suggest recovery actions
+        print_step("💡 Suggested Recovery Actions:")
+        print("1. Try running: python run.py --quick (if build was successful)")
+        print("2. Check database logs for specific errors")
+        print("3. If database issues persist, try: python run.py --db")
+        print("4. For complete reset: python run.py --rebuild")
         
     except Exception as e:
         print_error(f"Error during diagnostics: {e}")
@@ -1089,7 +1184,32 @@ def rebuild_application_from_scratch(use_sudo: bool = False) -> bool:
         
         # 8. Start fresh services
         print_step("🚀 Starting fresh application...")
-        run_command(["docker", "compose", "up", "-d"], capture_output=False, use_sudo=use_sudo)
+        result = run_command(["docker", "compose", "up", "-d"], capture_output=True, use_sudo=use_sudo, check=False)
+        
+        if result.returncode != 0:
+            print_error("❌ Failed to start services")
+            print("STDOUT:", result.stdout)
+            print("STDERR:", result.stderr)
+            
+            # Try to diagnose and fix the issue
+            print_step("🔧 Attempting to diagnose and fix startup issues...")
+            
+            # Check if database is the issue
+            db_result = run_command(["docker", "compose", "up", "-d", "postgres"], capture_output=True, use_sudo=use_sudo, check=False)
+            if db_result.returncode == 0:
+                print_success("✅ Database started successfully, retrying application...")
+                time.sleep(5)  # Wait for database to be fully ready
+                
+                # Retry starting the application
+                app_result = run_command(["docker", "compose", "up", "-d"], capture_output=True, use_sudo=use_sudo, check=False)
+                if app_result.returncode != 0:
+                    print_error("❌ Application still failed to start after database fix")
+                    diagnose_startup_failure()
+                    return False
+            else:
+                print_error("❌ Database failed to start")
+                diagnose_startup_failure()
+                return False
         
         # 9. Wait for application to be healthy
         if wait_for_health_check():
@@ -1123,6 +1243,8 @@ def main():
     parser.add_argument("--quickupgrade", action="store_true", help="Alias for --quickupdate")
     parser.add_argument("--rebuild", action="store_true", help="Complete rebuild - removes all containers, volumes, images and rebuilds everything from scratch (DESTRUCTIVE)")
     parser.add_argument("--db", action="store_true", help="Rebuild only the database - removes database container and volume, creates fresh database (DESTRUCTIVE for database only)")
+    parser.add_argument("--fix", action="store_true", help="Auto-fix common issues and restart services")
+    parser.add_argument("--diagnose", action="store_true", help="Run comprehensive diagnostics without making changes")
     
     args = parser.parse_args()
     
@@ -1145,6 +1267,21 @@ def main():
     # Check if should only show status
     if args.status_only:
         show_status()
+        return
+    
+    # Check if should run diagnostics
+    if args.diagnose:
+        print_step("🔍 Running comprehensive diagnostics...")
+        diagnose_startup_failure()
+        return
+    
+    # Check if should auto-fix issues
+    if args.fix:
+        print_step("🔧 Running auto-fix for common issues...")
+        if auto_fix_common_issues():
+            print_success("🎉 Auto-fix completed successfully!")
+        else:
+            print_error("❌ Auto-fix failed. Manual intervention may be required.")
         return
     
     # Check if should rebuild database only
@@ -1312,6 +1449,8 @@ def main():
 ║  To follow logs:          python run.py --follow-logs       ║
 ║  To view status:          python run.py --status-only       ║
 ║  To stop:                 python run.py --stop              ║
+║  To diagnose issues:      python run.py --diagnose          ║
+║  To auto-fix issues:      python run.py --fix               ║
 ║                                                              ║
 ║  ⚡ QUICK UPDATE: Fastest update with maximum cache         ║
 ║  🔄 FULL UPDATE: Complete rebuild for major changes        ║
@@ -1319,6 +1458,7 @@ def main():
 ║      rebuilds from scratch (including database!)           ║
 ║  🔄 DB REBUILD: Deletes only database, keeps application   ║
 ║  🛡️  Updates preserve database and configs (except rebuild) ║
+║  🔧 FIX: Auto-detects and fixes common deployment issues   ║
 ║                                                              ║
 ║  ⚠️  WARNING: Container running as ROOT to resolve          ║
 ║      file permission issues                                 ║
