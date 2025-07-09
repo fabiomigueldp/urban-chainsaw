@@ -632,11 +632,11 @@
                                 </select>
                             </div>
                             <div class="col-md-4">
-                                <input type="text" id="tickerFilter" class="form-control" placeholder="Filter by ticker...">
+                                <input type="text" id="orderTickerFilter" class="form-control" placeholder="Filter by ticker...">
                             </div>
                             <div class="col-md-4">
                                 <button id="refreshOrdersBtn" class="btn btn-outline-primary">
-                                    <i class="bi bi-arrow-clockwise"></i> Atualizar
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh
                                 </button>
                             </div>
                         </div>
@@ -672,11 +672,11 @@
                                     <tr>
                                         <th>Ticker</th>
                                         <th>Status</th>
-                                        <th>Entrada</th>
+                                        <th>Entry</th>
                                         <th>Exit</th>
-                                        <th>Duração</th>
-                                        <th>Valor</th>
-                                        <th>Ações</th>
+                                        <th>Duration</th>
+                                        <th>Value</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="ordersTableBody">
@@ -1465,6 +1465,9 @@
                 const signalId = document.getElementById('signalIdFilter').value;
                 const hours = document.getElementById('hourFilter').value;
                 
+                // Debug log
+                console.log('Filter values:', { limit, status, signalType, ticker, signalId, hours });
+                
                 params.append('limit', limit);
                 params.append('offset', (currentPage - 1) * parseInt(limit));
                 
@@ -1474,11 +1477,15 @@
                 if (signalId) params.append('signal_id', signalId);
                 if (hours) params.append('hours', hours);
                 
+                console.log('Final URL:', `/admin/audit-trail?${params}`);
+                
                 const response = await fetch(`/admin/audit-trail?${params}`);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 const data = await response.json();
+                
+                console.log('API Response:', data);
                 
                 displayAuditTrail(data);
                 updatePagination(data);
@@ -1725,6 +1732,9 @@
             
             // Audit trail controls
             document.getElementById('applyFiltersBtn').addEventListener('click', () => {
+                console.log('Apply filters button clicked');
+                const ticker = document.getElementById('tickerFilter').value;
+                console.log('Ticker filter value:', ticker);
                 currentPage = 1;
                 loadAuditTrail();
             });
@@ -1753,7 +1763,7 @@
                 loadOrders();
             });
             
-            document.getElementById('tickerFilter').addEventListener('input', (e) => {
+            document.getElementById('orderTickerFilter').addEventListener('input', (e) => {
                 ordersFilters.ticker = e.target.value;
                 // Debounce to avoid too many requests
                 clearTimeout(window.tickerFilterTimeout);

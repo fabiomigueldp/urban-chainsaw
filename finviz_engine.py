@@ -535,8 +535,8 @@ class FinvizEngine:
                 # Filter to only BUY signals
                 buy_signals = []
                 for signal_data in rejected_signals_payloads:
-                    signal_side = signal_data.get("side", "").lower()
-                    signal_type = signal_data.get("signal_type", "").lower()
+                    signal_side = (signal_data.get("side") or "").lower()
+                    signal_type = (signal_data.get("signal_type") or "").lower()
                     
                     # Check if it's a BUY signal
                     if signal_side in {"buy", "long", "enter"} or signal_type in {"buy"}:
@@ -564,7 +564,7 @@ class FinvizEngine:
 
                         # 2. For BUY signals: Open position AND add to forwarding queue
                         # For SELL signals: Only add to forwarding queue (if position exists)
-                        signal_side = signal_payload_dict.get("side", "").lower()
+                        signal_side = (signal_payload_dict.get("side") or "").lower()
                         signal_action = reprocessed_signal.action.lower() if hasattr(reprocessed_signal, 'action') and reprocessed_signal.action else ""
                         
                         # Determine if this is a BUY signal
