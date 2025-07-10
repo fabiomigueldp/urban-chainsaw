@@ -2,6 +2,17 @@
 
 A high-performance trading signal processing system that filters and forwards trading signals based on real-time Finviz Top-N ticker rankings. Only signals for tickers currently in the top-N list are approved and forwarded to destination webhooks.
 
+## 🎯 Key Features
+
+- **Real-time Signal Processing**: O(1) signal ingestion with asynchronous processing
+- **Top-N Filtering**: Automatic approval/rejection based on Finviz rankings
+- **Signal Reprocessing Engine**: Robust recovery of previously rejected signals when tickers enter Top-N
+- **Rate Limiting**: Configurable rate limiting for both Finviz and destination webhooks
+- **Position Management**: Automatic tracking of open/closed positions
+- **Real-time Monitoring**: WebSocket-based admin interface with live metrics
+- **Database Persistence**: Complete audit trail with PostgreSQL backend
+- **Health Monitoring**: Comprehensive health checks and alerting
+
 ## 🏗️ System Architecture
 
 ```
@@ -16,8 +27,8 @@ A high-performance trading signal processing system that filters and forwards tr
                              │ • Top-N check   │◄───│ Engine       │
                              │ • Approve/Reject│    │ • Ticker     │
                              └─────────┬───────┘    │   Updates    │
-                                       │            └──────────────┘
-                                       ▼ (if approved)
+                                       │            │ • Reprocessing│
+                                       ▼ (if approved) └─────────────┘
                               ┌─────────────────┐
                               │ Forwarding      │
                               │ Workers         │

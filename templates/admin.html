@@ -443,10 +443,22 @@
                             <h5 class="card-title mt-4">
                                 <i class="bi bi-arrow-repeat"></i> Signal Reprocessing Engine
                             </h5>
-                            <!-- 1. Main Status Indicator -->
+                            <!-- 1. Main Status Indicator with Health -->
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h6 class="mb-0">Status:</h6>
-                                <span id="reprocessingEngineStatus" class="badge bg-secondary fs-6">DISABLED</span>
+                                <div class="d-flex gap-2">
+                                    <span id="reprocessingEngineStatus" class="badge bg-secondary fs-6">DISABLED</span>
+                                    <span id="reprocessingHealthStatus" class="badge bg-info fs-6" style="display: none;">HEALTH: UNKNOWN</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Health Details -->
+                            <div id="reprocessingHealthDetails" class="mb-3" style="display: none;">
+                                <small class="text-muted">
+                                    <div>Success Rate: <span id="reprocessingSuccessRate">-</span>%</div>
+                                    <div>Last Run: <span id="reprocessingLastRun">-</span></div>
+                                    <div>Signals Processed: <span id="reprocessingSignalsProcessed">-</span></div>
+                                </small>
                             </div>
 
                             <!-- 2. Controles Simplificados -->
@@ -1061,6 +1073,9 @@
                 
                 // Load cleanup configuration
                 await loadCleanupConfig();
+                
+                // Load reprocessing health status
+                await loadReprocessingHealth();
                 
             } catch (error) {
                 console.error('Error loading initial data:', error);
@@ -1833,6 +1848,59 @@
             } catch (error) {
                 console.error('Error updating reprocessing config:', error);
                 showAlert(`Error updating reprocessing config: ${error.message}`, 'danger');
+            }
+        }
+
+        async function loadReprocessingHealth() {
+            try {
+                const response = await fetch('/admin/reprocessing/health');
+                if (response.ok) {
+                    const healthData = await response.json();
+                    updateReprocessingHealthDisplay(healthData);
+                } else {
+                    console.warn('Failed to load reprocessing health status');
+                }
+            } catch (error) {
+                console.error('Error loading reprocessing health:', error);
+            }
+        }
+
+        function updateReprocessingHealthDisplay(healthData) {
+            const healthBadge = document.getElementById('reprocessingHealthStatus');
+            const healthDetails = document.getElementById('reprocessingHealthDetails');
+            const successRateSpan = document.getElementById('reprocessingSuccessRate');
+            const lastRunSpan = document.getElementById('reprocessingLastRun');
+            const signalsProcessedSpan = document.getElementById('reprocessingSignalsProcessed');
+
+            if (healthData.reprocessing_engine && healthData.reprocessing_engine.status !== 'UNKNOWN') {
+                const engine = healthData.reprocessing_engine;
+                
+                // Update health badge
+                healthBadge.textContent = `HEALTH: ${engine.status}`;
+                healthBadge.style.display = 'inline';
+                
+                // Set badge color based on health status
+                healthBadge.className = 'badge fs-6';
+                if (engine.status === 'HEALTHY') {
+                    healthBadge.classList.add('bg-success');
+                } else if (engine.status === 'WARNING') {
+                    healthBadge.classList.add('bg-warning');
+                } else if (engine.status === 'CRITICAL') {
+                    healthBadge.classList.add('bg-danger');
+                } else {
+                    healthBadge.classList.add('bg-info');
+                }
+                
+                // Update health details
+                if (engine.success_rate !== undefined) {
+                    successRateSpan.textContent = engine.success_rate.toFixed(1);
+                    lastRunSpan.textContent = engine.last_run ? new Date(engine.last_run).toLocaleString() : 'Never';
+                    signalsProcessedSpan.textContent = engine.signals_processed || 0;
+                    healthDetails.style.display = 'block';
+                }
+            } else {
+                healthBadge.style.display = 'none';
+                healthDetails.style.display = 'none';
             }
         }
 

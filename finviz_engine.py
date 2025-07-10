@@ -521,6 +521,59 @@ class FinvizEngine:
             await self._broadcast_status_update()
 
     async def _reprocess_signals_for_new_tickers(self, new_tickers: Set[str], window_seconds: int):
+        """
+        Enhanced reprocessing using the robust SignalReprocessingEngine.
+        """
+        _logger.info(f"Starting enhanced reprocessing for {len(new_tickers)} new tickers within {window_seconds}s window")
+        
+        # Import the robust reprocessing engine
+        try:
+            from signal_reprocessing_engine import SignalReprocessingEngine
+            from main import db_manager, approved_signal_queue, shared_state
+            
+            # Create reprocessing engine instance
+            reprocessing_engine = SignalReprocessingEngine(
+                db_manager=db_manager,
+                approved_signal_queue=approved_signal_queue
+            )
+            
+            # Process the new tickers
+            result = await reprocessing_engine.process_new_tickers(new_tickers, window_seconds)
+            
+            # Update shared state metrics
+            if result.signals_reprocessed > 0:
+                shared_state["signal_metrics"]["signals_approved"] += result.signals_reprocessed
+                if shared_state["signal_metrics"]["signals_rejected"] >= result.signals_reprocessed:
+                    shared_state["signal_metrics"]["signals_rejected"] -= result.signals_reprocessed
+                else:
+                    _logger.warning("Cannot decrement signals_rejected - would go below 0")
+            
+            # Log summary
+            if result.success:
+                _logger.info(f"✅ Reprocessing completed successfully: "
+                           f"{result.signals_reprocessed} signals reprocessed from {result.signals_found} found, "
+                           f"success rate: {result.metrics.get_success_rate():.1f}%")
+            else:
+                _logger.error(f"❌ Reprocessing completed with errors: "
+                            f"{result.signals_reprocessed} successful, {result.signals_failed} failed, "
+                            f"errors: {result.errors}")
+            
+            # Broadcast final metrics update
+            try:
+                from comm_engine import comm_engine
+                from main import get_current_metrics
+                await comm_engine.broadcast("metrics_update", get_current_metrics())
+            except Exception as e:
+                _logger.warning(f"Failed to broadcast final metrics update: {e}")
+                
+        except ImportError as e:
+            _logger.error(f"Failed to import SignalReprocessingEngine: {e}. Falling back to legacy implementation.")
+            await self._legacy_reprocess_signals_for_new_tickers(new_tickers, window_seconds)
+        except Exception as e:
+            _logger.error(f"Enhanced reprocessing failed: {e}. Falling back to legacy implementation.")
+            await self._legacy_reprocess_signals_for_new_tickers(new_tickers, window_seconds)
+
+    async def _legacy_reprocess_signals_for_new_tickers(self, new_tickers: Set[str], window_seconds: int):
         _logger.info(f"Attempting to reprocess signals for {len(new_tickers)} new tickers within a {window_seconds}s window.")
         from main import db_manager, approved_signal_queue, shared_state # Import necessary components
         from database.simple_models import SignalStatusEnum, SignalLocationEnum, Signal as DBSignalModel # Import Signal for type hint
@@ -535,14 +588,25 @@ class FinvizEngine:
                 # Filter to only BUY signals
                 buy_signals = []
                 for signal_data in rejected_signals_payloads:
-                    signal_side = (signal_data.get("side") or "").lower()
-                    signal_type = (signal_data.get("signal_type") or "").lower()
+                    signal_side = (signal_data.get("side") or "").lower().strip()
+                    signal_type = (signal_data.get("signal_type") or "").lower().strip()
                     
-                    # Check if it's a BUY signal
-                    if signal_side in {"buy", "long", "enter"} or signal_type in {"buy"}:
+                    # Enhanced BUY signal detection with more comprehensive triggers
+                    buy_triggers = {"buy", "long", "enter", "open", "bull"}
+                    
+                    # Check if it's a BUY signal using multiple criteria
+                    is_buy_signal = (
+                        signal_side in buy_triggers or 
+                        signal_type in buy_triggers or
+                        (not signal_side and signal_type == "buy") or  # Default case when side is empty
+                        (not signal_side and not signal_type)  # Default to BUY when both are empty
+                    )
+                    
+                    if is_buy_signal:
                         buy_signals.append(signal_data)
+                        _logger.debug(f"Including BUY signal {signal_data.get('signal_id')} for reprocessing (side: '{signal_side}', type: '{signal_type}')")
                     else:
-                        _logger.debug(f"Skipping non-BUY signal {signal_data.get('signal_id')} for reprocessing (side: {signal_side}, type: {signal_type})")
+                        _logger.debug(f"Skipping non-BUY signal {signal_data.get('signal_id')} for reprocessing (side: '{signal_side}', type: '{signal_type}')")
                 
                 rejected_signals_payloads = buy_signals
 
@@ -562,7 +626,29 @@ class FinvizEngine:
                             _logger.error(f"Failed to re-approve signal {signal_id} in database.")
                             continue
 
-                        # 2. For BUY signals: Open position AND add to forwarding queue
+                        # 2. Reconstruct the Signal object from the stored original_signal dict FIRST
+                        # Reconstruct the Signal object from the stored original_signal dict
+                        from models import Signal as SignalPydanticModel
+                        try:
+                            original_signal_data = signal_payload_dict.get("original_signal", {})
+                            if not original_signal_data: # Fallback if original_signal is empty
+                                original_signal_data = {
+                                    "ticker": signal_payload_dict.get("ticker"),
+                                    "side": signal_payload_dict.get("side"),
+                                    "price": signal_payload_dict.get("price"),
+                                    "time": signal_payload_dict.get("created_at").isoformat() if signal_payload_dict.get("created_at") else None,
+                                    "signal_id": signal_id # Ensure signal_id is present
+                                }
+
+                            reprocessed_signal = SignalPydanticModel(**original_signal_data)
+                            # Ensure the signal_id matches the one from the database record
+                            reprocessed_signal.signal_id = signal_id
+
+                        except Exception as pydantic_error:
+                            _logger.error(f"Error reconstructing Signal object for {signal_id}: {pydantic_error}. Original data: {original_signal_data}")
+                            continue
+
+                        # 3. For BUY signals: Open position AND add to forwarding queue
                         # For SELL signals: Only add to forwarding queue (if position exists)
                         signal_side = (signal_payload_dict.get("side") or "").lower()
                         signal_action = reprocessed_signal.action.lower() if hasattr(reprocessed_signal, 'action') and reprocessed_signal.action else ""
@@ -608,28 +694,7 @@ class FinvizEngine:
                             _logger.warning(f"Reprocessing: Unknown signal type for {signal_id} - side: '{signal_side}', action: '{signal_action}'")
                             continue
 
-                        # 3. Add to approved_signal_queue for forwarding
-                        # Reconstruct the Signal object from the stored original_signal dict
-                        from models import Signal as SignalPydanticModel
-                        try:
-                            original_signal_data = signal_payload_dict.get("original_signal", {})
-                            if not original_signal_data: # Fallback if original_signal is empty
-                                original_signal_data = {
-                                    "ticker": signal_payload_dict.get("ticker"),
-                                    "side": signal_payload_dict.get("side"),
-                                    "price": signal_payload_dict.get("price"),
-                                    "time": signal_payload_dict.get("created_at").isoformat() if signal_payload_dict.get("created_at") else None,
-                                    "signal_id": signal_id # Ensure signal_id is present
-                                }
-
-                            reprocessed_signal = SignalPydanticModel(**original_signal_data)
-                            # Ensure the signal_id matches the one from the database record
-                            reprocessed_signal.signal_id = signal_id
-
-                        except Exception as pydantic_error:
-                            _logger.error(f"Error reconstructing Signal object for {signal_id}: {pydantic_error}. Original data: {original_signal_data}")
-                            continue
-
+                        # 4. Add to approved_signal_queue for forwarding
                         approved_signal_data = {
                             'signal': reprocessed_signal, # The Pydantic Signal model instance
                             'ticker': reprocessed_signal.normalised_ticker(),

@@ -2425,3 +2425,90 @@ async def get_sell_all_config():
     except Exception as e:
         _logger.error(f"Error getting sell-all config: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/admin/reprocessing/health")
+async def get_reprocessing_health():
+    """Get health status of the Signal Reprocessing Engine."""
+    try:
+        from signal_reprocessing_engine import SignalReprocessingEngine
+        
+        # Get the finviz engine instance
+        finviz_engine = shared_state.get("finviz_engine_instance")
+        if not finviz_engine:
+            return {"status": "ENGINE_NOT_AVAILABLE", "message": "Finviz engine not initialized"}
+        
+        # Create a temporary reprocessing engine to get health status
+        # In a production system, you might want to store this as a singleton
+        temp_engine = SignalReprocessingEngine(db_manager, approved_signal_queue)
+        health_status = temp_engine.get_health_status()
+        
+        return {
+            "reprocessing_engine": health_status,
+            "finviz_engine_running": finviz_engine.is_running() if hasattr(finviz_engine, 'is_running') else "unknown"
+        }
+        
+    except ImportError:
+        return {
+            "status": "MODULE_NOT_AVAILABLE", 
+            "message": "Signal Reprocessing Engine module not available"
+        }
+    except Exception as e:
+        _logger.error(f"Error getting reprocessing health: {e}")
+        return {
+            "status": "ERROR",
+            "message": f"Error retrieving health status: {str(e)}"
+        }
+
+@app.post("/admin/reprocessing/trigger")
+async def trigger_manual_reprocessing(payload: dict = Body(...)):
+    """
+    Manually trigger reprocessing for specific tickers.
+    Expects: {"tickers": ["AAPL", "MSFT"], "window_seconds": 300, "token": "admin_token"}
+    """
+    token = payload.get("token")
+    if token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for manual reprocessing trigger.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    
+    tickers = payload.get("tickers", [])
+    window_seconds = payload.get("window_seconds", 300)
+    
+    if not tickers:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No tickers specified")
+    
+    if not isinstance(tickers, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tickers must be a list")
+    
+    try:
+        from signal_reprocessing_engine import SignalReprocessingEngine
+        
+        # Create reprocessing engine
+        reprocessing_engine = SignalReprocessingEngine(db_manager, approved_signal_queue)
+        
+        # Convert tickers to set and normalize
+        ticker_set = {ticker.upper().strip() for ticker in tickers if ticker.strip()}
+        
+        if not ticker_set:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid tickers provided")
+        
+        # Trigger reprocessing
+        result = await reprocessing_engine.process_new_tickers(ticker_set, window_seconds)
+        
+        return {
+            "success": result.success,
+            "tickers_processed": list(result.metrics.tickers_processed),
+            "signals_found": result.signals_found,
+            "signals_reprocessed": result.signals_reprocessed,
+            "signals_failed": result.signals_failed,
+            "success_rate": result.metrics.get_success_rate(),
+            "duration_ms": result.duration_ms,
+            "errors": result.errors
+        }
+        
+    except ImportError:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                           detail="Signal Reprocessing Engine not available")
+    except Exception as e:
+        _logger.error(f"Error in manual reprocessing: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                           detail=f"Reprocessing failed: {str(e)}")
