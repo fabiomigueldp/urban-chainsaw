@@ -1131,11 +1131,16 @@ async def receive_signal(signal: Signal, _bg: BackgroundTasks):
     try:        # Increment received signals counter
         shared_state["signal_metrics"]["signals_received"] += 1
         
-        # Determine signal type based on side
+        # Determine signal type based on side and action
         from database.simple_models import SignalTypeEnum
         signal_type = SignalTypeEnum.BUY  # Default
-        if signal.side and signal.side.lower() == 'sell':
+        sig_side = (signal.side or "").lower()
+        sig_action = (signal.action or "").lower()
+        if (sig_side in {"sell"} or sig_action in {"sell", "exit", "close"}):
             signal_type = SignalTypeEnum.SELL
+            
+        # Log signal classification for debugging
+        _logger.info(f"[SIGNAL: {signal.signal_id}] Classification: side='{sig_side}', action='{sig_action}', type={signal_type.value}")
         
         # Persist signal to database
         try:

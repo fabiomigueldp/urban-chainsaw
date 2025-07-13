@@ -591,22 +591,29 @@ class FinvizEngine:
                     signal_side = (signal_data.get("side") or "").lower().strip()
                     signal_type = (signal_data.get("signal_type") or "").lower().strip()
                     
+                    # Check original_signal action to ensure we don't reprocess SELL signals
+                    original_signal = signal_data.get("original_signal", {})
+                    original_action = (original_signal.get("action") or "").lower()
+                    
                     # Enhanced BUY signal detection with more comprehensive triggers
                     buy_triggers = {"buy", "long", "enter", "open", "bull"}
+                    sell_triggers = {"sell", "exit", "close"}
                     
-                    # Check if it's a BUY signal using multiple criteria
+                    # Check if it's truly a BUY signal (exclude SELL actions)
                     is_buy_signal = (
-                        signal_side in buy_triggers or 
-                        signal_type in buy_triggers or
-                        (not signal_side and signal_type == "buy") or  # Default case when side is empty
-                        (not signal_side and not signal_type)  # Default to BUY when both are empty
+                        (signal_side in buy_triggers or 
+                         signal_type in buy_triggers or
+                         (not signal_side and signal_type == "buy") or  # Default case when side is empty
+                         (not signal_side and not signal_type))  # Default to BUY when both are empty
+                        and original_action not in sell_triggers  # Critical: exclude SELL actions
                     )
                     
                     if is_buy_signal:
                         buy_signals.append(signal_data)
-                        _logger.debug(f"Including BUY signal {signal_data.get('signal_id')} for reprocessing (side: '{signal_side}', type: '{signal_type}')")
+                        _logger.debug(f"Including BUY signal {signal_data.get('signal_id')} for reprocessing (side: '{signal_side}', type: '{signal_type}', original_action: '{original_action}')")
                     else:
-                        _logger.debug(f"Skipping non-BUY signal {signal_data.get('signal_id')} for reprocessing (side: '{signal_side}', type: '{signal_type}')")
+                        _logger.debug(f"Skipping non-BUY signal {signal_data.get('signal_id')} for reprocessing (side: '{signal_side}', type: '{signal_type}', original_action: '{original_action}')")
+                
                 
                 rejected_signals_payloads = buy_signals
 
@@ -651,7 +658,10 @@ class FinvizEngine:
                         # 3. For BUY signals: Open position AND add to forwarding queue
                         # For SELL signals: Only add to forwarding queue (if position exists)
                         signal_side = (signal_payload_dict.get("side") or "").lower()
-                        signal_action = reprocessed_signal.action.lower() if hasattr(reprocessed_signal, 'action') and reprocessed_signal.action else ""
+                        
+                        # FIX: Use original_signal to get action instead of undefined reprocessed_signal
+                        original_signal = signal_payload_dict.get("original_signal", {})
+                        signal_action = (original_signal.get("action") or "").lower()
                         
                         # Determine if this is a BUY signal
                         buy_triggers = {"buy", "long", "enter"}
@@ -659,6 +669,10 @@ class FinvizEngine:
                         
                         is_buy_signal = (signal_side in buy_triggers) or (signal_action in buy_triggers)
                         is_sell_signal = (signal_side in sell_triggers) or (signal_action in sell_triggers)
+                        
+                        # Log detailed classification information
+                        _logger.info(f"[REPROCESSING] Signal {signal_id}: side='{signal_side}', "
+                                   f"action='{signal_action}', is_buy={is_buy_signal}, is_sell={is_sell_signal}")
                         
                         if is_buy_signal:
                             # For BUY signals: Open position (just like _queue_worker does)
@@ -691,7 +705,10 @@ class FinvizEngine:
                                 sell_all_data = await get_sell_all_list_data()
                                 await comm_engine.trigger_sell_all_list_update(sell_all_data)
                         else:
-                            _logger.warning(f"Reprocessing: Unknown signal type for {signal_id} - side: '{signal_side}', action: '{signal_action}'")
+                            # IMPORTANT: Signal is neither clearly BUY nor SELL
+                            # This should NOT happen with the improved filtering above
+                            _logger.warning(f"Reprocessing: Unknown signal type for {signal_id} - side: '{signal_side}', action: '{signal_action}'. "
+                                          f"This indicates a potential bug in signal classification.")
                             continue
 
                         # 4. Add to approved_signal_queue for forwarding
