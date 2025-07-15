@@ -67,11 +67,12 @@ class FinvizConfig(BaseModel):
         return v
 
 class FinvizEngine:
-    def __init__(self, shared_state: Dict[str, Any], admin_ws_broadcaster: callable):
+    def __init__(self, shared_state: Dict[str, Any], admin_ws_broadcaster: callable, db_manager):
         self.shared_state = shared_state
         self.shared_state["tickers"] = set()  # Initialize with an empty set
         self.last_known_good_tickers: Set[str] = set()
         self.admin_ws_broadcaster = admin_ws_broadcaster
+        self.db_manager = db_manager  # Database manager for strategy configuration
 
         # Rate limiting and concurrency control - using dynamic values
         self.rate_limit_semaphore = asyncio.Semaphore(get_max_req_per_min()) # Tokens for 1 minute
@@ -277,48 +278,47 @@ class FinvizEngine:
     async def get_config(self) -> FinvizConfig:
         async with self._config_lock:
             if self._current_config is None:
-                await self._load_config_from_file()
+                await self._load_config_from_db()
             return self._current_config
 
-    async def _load_config_from_file(self) -> None:
-        """Loads configuration from finviz_config.json"""
+    async def _load_config_from_db(self) -> None:
+        """Loads configuration from active Finviz strategy in database - SINGLE SOURCE OF TRUTH"""
         try:
-            config_data = load_finviz_config() # finviz.py function
-            if not config_data.get("finviz_url") or not config_data.get("top_n"):
-                _logger.warning(f"{FINVIZ_CONFIG_FILE} is missing 'finviz_url' or 'top_n'. Using defaults or previous if available.")
-                # Fallback to ensure engine can start even with a bad/missing initial config
-                if self._current_config: # Keep using current if load fails
-                    _logger.info(f"Kept existing config due to load failure: {self._current_config}")
-                    return
-                else: # Critical if no config at all on first load
-                    _logger.error(f"CRITICAL: No valid config in {FINVIZ_CONFIG_FILE} and no prior config. Engine cannot start fetching.")
-                    # A default safe config could be set here if desired
-                    # For now, it will likely fail in run() if _current_config remains None
-                    raise ValueError("Initial configuration load failed and no defaults set.")
-
-            self._current_config = FinvizConfig(
-                url=config_data["finviz_url"],
-                top_n=config_data["top_n"],
-                refresh=config_data.get("refresh_interval_sec", DEFAULT_TICKER_REFRESH_SEC),
-                reprocess_enabled=config_data.get("reprocess_enabled", False),
-                reprocess_window_seconds=config_data.get("reprocess_window_seconds", 300),
-                respect_sell_chronology_enabled=config_data.get("respect_sell_chronology_enabled", True),
-                sell_chronology_window_seconds=config_data.get("sell_chronology_window_seconds", 300)
-            )
-            _logger.info(f"Successfully loaded config: URL={self._current_config.url}, TopN={self._current_config.top_n}, Refresh={self._current_config.refresh}s, ReprocessEnabled={self._current_config.reprocess_enabled}, ReprocessWindow={self._current_config.reprocess_window_seconds}s, RespectSellChronology={self._current_config.respect_sell_chronology_enabled}, SellChronologyWindow={self._current_config.sell_chronology_window_seconds}s")
+            active_strategy = await self.db_manager.get_active_finviz_url()
+            if not active_strategy:
+                raise RuntimeError("No active Finviz strategy found in database")
+                
+            # Build FinvizConfig with ALL 7 parameters from database
+            config_data = {
+                "url": active_strategy["url"],
+                "top_n": active_strategy["top_n"],
+                "refresh": active_strategy["refresh_interval_sec"],
+                "reprocess_enabled": active_strategy["reprocess_enabled"],
+                "reprocess_window_seconds": active_strategy["reprocess_window_seconds"],
+                "respect_sell_chronology_enabled": active_strategy["respect_sell_chronology_enabled"],
+                "sell_chronology_window_seconds": active_strategy["sell_chronology_window_seconds"]
+            }
+            
+            self._current_config = FinvizConfig(**config_data)
+            await self.db_manager.update_finviz_url_last_used(active_strategy["id"])
+            
+            _logger.info(f"Loaded strategy from DB: {active_strategy['name']} - URL: {active_strategy['url'][:50]}...")
+            _logger.info(f"Config: TopN={self._current_config.top_n}, Refresh={self._current_config.refresh}s, "
+                        f"ReprocessEnabled={self._current_config.reprocess_enabled}, "
+                        f"ReprocessWindow={self._current_config.reprocess_window_seconds}s, "
+                        f"RespectSellChronology={self._current_config.respect_sell_chronology_enabled}, "
+                        f"SellChronologyWindow={self._current_config.sell_chronology_window_seconds}s")
+                        
         except Exception as e:
-            _logger.error(f"Error loading config from {FINVIZ_CONFIG_FILE}: {e}. Engine will use last known good config or defaults if available.")
-            if not self._current_config: # If there's no config at all (e.g. first run)
-                 _logger.critical(f"CRITICAL: Failed to load initial configuration from {FINVIZ_CONFIG_FILE}. Engine cannot operate without a base configuration.")
-                 # Consider raising an exception here to halt startup if no config can be loaded
-                 # For now, we'll let it try to run, but it will likely fail in the main loop.
-                 # A more robust solution might involve setting a very basic default config.
-                 raise # Re-raise to signal critical failure if no config at all
+            _logger.error(f"Error loading config from database: {e}")
+            if not self._current_config:
+                _logger.critical("CRITICAL: Failed to load initial configuration from database. Engine cannot operate.")
+                raise RuntimeError("No active Finviz strategy configuration available") from e
 
     async def update_config(self, new_config_data: Dict[str, Any]) -> None:
         async with self._config_lock:
             if self._current_config is None: # Should have been loaded by get_config or run
-                await self._load_config_from_file()
+                await self._load_config_from_db()
 
             # Create a proposed new configuration, merging with current
             proposed_data = self._current_config.dict()

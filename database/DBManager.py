@@ -252,12 +252,8 @@ class DBManager:
                     'end_time': end_time
                 })
                 
-                # Map database data by hour
-                data_by_hour = {}
-                for row in result:
-                    # Ensure hour is timezone-aware
-                    hour_key = row.hour.replace(tzinfo=None) if row.hour.tzinfo else row.hour
-                    data_by_hour[hour_key] = row
+                # Map database data to hour
+                data_by_hour = {row.hour: row for row in result}
                 
                 _logger.info(f"Found data for {len(data_by_hour)} hours in database")
                 
@@ -1342,6 +1338,427 @@ class DBManager:
                 "ticker": position.ticker,
                 "status": "closed",
                 "closed_at": position.closed_at.isoformat()
+            }
+
+    # ==========================================================================================
+    #                    FINVIZ STRATEGY MANAGEMENT METHODS
+    # ==========================================================================================
+
+    async def create_finviz_url(
+        self, 
+        name: str, 
+        url: str, 
+        description: str = None,
+        top_n: int = 100,
+        refresh_interval_sec: int = 10,
+        reprocess_enabled: bool = False,
+        reprocess_window_seconds: int = 300,
+        respect_sell_chronology_enabled: bool = True,
+        sell_chronology_window_seconds: int = 300,
+        is_active: bool = False
+    ) -> int:
+        """Creates a new complete Finviz strategy."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            # If setting as active, deactivate all others first
+            if is_active:
+                await session.execute(
+                    text("UPDATE finviz_urls SET is_active = false WHERE is_active = true")
+                )
+            
+            finviz_url = FinvizUrl(
+                name=name,
+                url=url,
+                description=description,
+                top_n=top_n,
+                refresh_interval_sec=refresh_interval_sec,
+                reprocess_enabled=reprocess_enabled,
+                reprocess_window_seconds=reprocess_window_seconds,
+                respect_sell_chronology_enabled=respect_sell_chronology_enabled,
+                sell_chronology_window_seconds=sell_chronology_window_seconds,
+                is_active=is_active
+            )
+            
+            session.add(finviz_url)
+            await session.flush()
+            
+            _logger.info(f"Created Finviz strategy '{name}' with ID {finviz_url.id}")
+            return finviz_url.id
+
+    async def get_finviz_urls(self) -> List[Dict[str, Any]]:
+        """Returns all Finviz strategies."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            result = await session.execute(
+                select(FinvizUrl).order_by(desc(FinvizUrl.is_active), FinvizUrl.name)
+            )
+            urls = result.scalars().all()
+            
+            return [
+                {
+                    "id": url.id,
+                    "name": url.name,
+                    "url": url.url,
+                    "description": url.description,
+                    "top_n": url.top_n,
+                    "refresh_interval_sec": url.refresh_interval_sec,
+                    "reprocess_enabled": url.reprocess_enabled,
+                    "reprocess_window_seconds": url.reprocess_window_seconds,
+                    "respect_sell_chronology_enabled": url.respect_sell_chronology_enabled,
+                    "sell_chronology_window_seconds": url.sell_chronology_window_seconds,
+                    "is_active": url.is_active,
+                    "created_at": url.created_at.isoformat() if url.created_at else None,
+                    "updated_at": url.updated_at.isoformat() if url.updated_at else None,
+                    "last_used_at": url.last_used_at.isoformat() if url.last_used_at else None
+                }
+                for url in urls
+            ]
+
+    async def get_active_finviz_url(self) -> Optional[Dict[str, Any]]:
+        """Returns the currently active Finviz strategy with all parameters."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            result = await session.execute(
+                select(FinvizUrl).where(FinvizUrl.is_active == True)
+            )
+            url = result.scalar_one_or_none()
+            
+            if not url:
+                return None
+                
+            return {
+                "id": url.id,
+                "name": url.name,
+                "url": url.url,
+                "description": url.description,
+                "top_n": url.top_n,
+                "refresh_interval_sec": url.refresh_interval_sec,
+                "reprocess_enabled": url.reprocess_enabled,
+                "reprocess_window_seconds": url.reprocess_window_seconds,
+                "respect_sell_chronology_enabled": url.respect_sell_chronology_enabled,
+                "sell_chronology_window_seconds": url.sell_chronology_window_seconds,
+                "is_active": url.is_active,
+                "created_at": url.created_at.isoformat() if url.created_at else None,
+                "updated_at": url.updated_at.isoformat() if url.updated_at else None,
+                "last_used_at": url.last_used_at.isoformat() if url.last_used_at else None
+            }
+
+    async def get_first_finviz_url(self) -> Optional[Dict[str, Any]]:
+        """Returns the first Finviz strategy (for fallback)."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            result = await session.execute(
+                select(FinvizUrl).order_by(FinvizUrl.created_at).limit(1)
+            )
+            url = result.scalar_one_or_none()
+            
+            if not url:
+                return None
+                
+            return {
+                "id": url.id,
+                "name": url.name,
+                "url": url.url,
+                "description": url.description,
+                "top_n": url.top_n,
+                "refresh_interval_sec": url.refresh_interval_sec,
+                "reprocess_enabled": url.reprocess_enabled,
+                "reprocess_window_seconds": url.reprocess_window_seconds,
+                "respect_sell_chronology_enabled": url.respect_sell_chronology_enabled,
+                "sell_chronology_window_seconds": url.sell_chronology_window_seconds,
+                "is_active": url.is_active,
+                "created_at": url.created_at.isoformat() if url.created_at else None,
+                "updated_at": url.updated_at.isoformat() if url.updated_at else None,
+                "last_used_at": url.last_used_at.isoformat() if url.last_used_at else None
+            }
+
+    async def set_active_finviz_url(self, url_id: int) -> bool:
+        """Sets a strategy as active (deactivates others) - ATOMIC TRANSACTION."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            # Check if the URL exists
+            result = await session.execute(
+                select(FinvizUrl).where(FinvizUrl.id == url_id)
+            )
+            target_url = result.scalar_one_or_none()
+            
+            if not target_url:
+                _logger.error(f"Finviz URL with ID {url_id} not found")
+                return False
+            
+            # Atomic operation: deactivate all, then activate target
+            await session.execute(
+                text("UPDATE finviz_urls SET is_active = false WHERE is_active = true")
+            )
+            
+            target_url.is_active = True
+            target_url.updated_at = func.now()
+            
+            _logger.info(f"Set Finviz strategy '{target_url.name}' (ID: {url_id}) as active")
+            return True
+
+    async def update_finviz_url(self, url_id: int, **kwargs) -> bool:
+        """Updates an existing Finviz strategy (any parameter)."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            result = await session.execute(
+                select(FinvizUrl).where(FinvizUrl.id == url_id)
+            )
+            url = result.scalar_one_or_none()
+            
+            if not url:
+                _logger.error(f"Finviz URL with ID {url_id} not found")
+                return False
+            
+            # Update fields
+            allowed_fields = {
+                'name', 'url', 'description', 'top_n', 'refresh_interval_sec',
+                'reprocess_enabled', 'reprocess_window_seconds', 
+                'respect_sell_chronology_enabled', 'sell_chronology_window_seconds'
+            }
+            
+            updated_fields = []
+            for key, value in kwargs.items():
+                if key in allowed_fields and hasattr(url, key):
+                    setattr(url, key, value)
+                    updated_fields.append(key)
+            
+            if updated_fields:
+                url.updated_at = func.now()
+                _logger.info(f"Updated Finviz strategy '{url.name}' (ID: {url_id}): {updated_fields}")
+                return True
+            
+            return False
+
+    async def delete_finviz_url(self, url_id: int) -> bool:
+        """Removes a Finviz strategy (cannot be the active one)."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            result = await session.execute(
+                select(FinvizUrl).where(FinvizUrl.id == url_id)
+            )
+            url = result.scalar_one_or_none()
+            
+            if not url:
+                _logger.error(f"Finviz URL with ID {url_id} not found")
+                return False
+            
+            if url.is_active:
+                _logger.error(f"Cannot delete active Finviz strategy '{url.name}' (ID: {url_id})")
+                return False
+            
+            await session.delete(url)
+            _logger.info(f"Deleted Finviz strategy '{url.name}' (ID: {url_id})")
+            return True
+
+    async def count_finviz_urls(self) -> int:
+        """Returns the number of registered Finviz strategies."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            result = await session.execute(select(func.count(FinvizUrl.id)))
+            return result.scalar() or 0
+
+    async def update_finviz_url_last_used(self, url_id: int) -> None:
+        """Updates the last used timestamp for a Finviz strategy."""
+        from database.simple_models import FinvizUrl
+        
+        async with self.get_session() as session:
+            result = await session.execute(
+                select(FinvizUrl).where(FinvizUrl.id == url_id)
+            )
+            url = result.scalar_one_or_none()
+            
+            if url:
+                url.last_used_at = func.now()
+                _logger.debug(f"Updated last_used_at for Finviz strategy '{url.name}' (ID: {url_id})")
+
+    # ==========================================================================================
+    #                       ADMIN ACTIONS LOG METHODS
+    # ==========================================================================================
+
+    async def log_admin_action(
+        self,
+        action_type: str,
+        action_name: str,
+        admin_token: str,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        target_resource: Optional[str] = None,
+        success: bool = True,
+        error_message: Optional[str] = None,
+        execution_time_ms: Optional[int] = None
+    ) -> int:
+        """Logs an administrative action with direct token for audit."""
+        from database.simple_models import AdminAction
+        
+        async with self.get_session() as session:
+            admin_action = AdminAction(
+                action_type=action_type,
+                action_name=action_name,
+                admin_token=admin_token,  # Direct token for audit
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details=details,
+                target_resource=target_resource,
+                success=success,
+                error_message=error_message,
+                execution_time_ms=execution_time_ms
+            )
+            
+            session.add(admin_action)
+            await session.flush()
+            
+            _logger.info(f"Logged admin action: {action_type}/{action_name} - Success: {success}")
+            return admin_action.action_id
+
+    async def get_admin_actions_log(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        action_type_filter: Optional[str] = None,
+        admin_token_filter: Optional[str] = None,
+        hours: Optional[int] = None,
+        success_filter: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
+        """Returns administrative actions log with filters."""
+        from database.simple_models import AdminAction
+        
+        async with self.get_session() as session:
+            # Build query with filters
+            query = select(AdminAction)
+            
+            # Apply filters
+            filters = []
+            if action_type_filter:
+                filters.append(AdminAction.action_type == action_type_filter)
+            if admin_token_filter:
+                filters.append(AdminAction.admin_token == admin_token_filter)
+            if success_filter is not None:
+                filters.append(AdminAction.success == success_filter)
+            if hours:
+                cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+                filters.append(AdminAction.timestamp >= cutoff_time)
+            
+            if filters:
+                query = query.where(and_(*filters))
+            
+            # Order by timestamp descending (newest first)
+            query = query.order_by(desc(AdminAction.timestamp))
+            query = query.offset(offset).limit(limit)
+            
+            result = await session.execute(query)
+            actions = result.scalars().all()
+            
+            return [
+                {
+                    "action_id": action.action_id,
+                    "timestamp": action.timestamp.isoformat(),
+                    "action_type": action.action_type,
+                    "action_name": action.action_name,
+                    "admin_token": action.admin_token,
+                    "ip_address": str(action.ip_address) if action.ip_address else None,
+                    "user_agent": action.user_agent,
+                    "details": action.details,
+                    "target_resource": action.target_resource,
+                    "success": action.success,
+                    "error_message": action.error_message,
+                    "execution_time_ms": action.execution_time_ms
+                }
+                for action in actions
+            ]
+
+    async def get_admin_actions_count(
+        self,
+        action_type_filter: Optional[str] = None,
+        admin_token_filter: Optional[str] = None,
+        hours: Optional[int] = None,
+        success_filter: Optional[bool] = None
+    ) -> int:
+        """Returns total count of administrative actions with filters."""
+        from database.simple_models import AdminAction
+        
+        async with self.get_session() as session:
+            # Build query with filters
+            query = select(func.count(AdminAction.action_id))
+            
+            # Apply filters
+            filters = []
+            if action_type_filter:
+                filters.append(AdminAction.action_type == action_type_filter)
+            if admin_token_filter:
+                filters.append(AdminAction.admin_token == admin_token_filter)
+            if success_filter is not None:
+                filters.append(AdminAction.success == success_filter)
+            if hours:
+                cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+                filters.append(AdminAction.timestamp >= cutoff_time)
+            
+            if filters:
+                query = query.where(and_(*filters))
+            
+            result = await session.execute(query)
+            return result.scalar() or 0
+
+    async def get_admin_actions_summary(self, hours: int = 24) -> Dict[str, Any]:
+        """Returns summary statistics for administrative actions."""
+        from database.simple_models import AdminAction
+        
+        async with self.get_session() as session:
+            cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+            
+            # Total actions in period
+            total_result = await session.execute(
+                select(func.count(AdminAction.action_id))
+                .where(AdminAction.timestamp >= cutoff_time)
+            )
+            total_actions = total_result.scalar() or 0
+            
+            # Success/failure counts
+            success_result = await session.execute(
+                select(func.count(AdminAction.action_id))
+                .where(and_(AdminAction.timestamp >= cutoff_time, AdminAction.success == True))
+            )
+            successful_actions = success_result.scalar() or 0
+            
+            failed_actions = total_actions - successful_actions
+            
+            # Actions by type
+            type_result = await session.execute(
+                select(AdminAction.action_type, func.count(AdminAction.action_id))
+                .where(AdminAction.timestamp >= cutoff_time)
+                .group_by(AdminAction.action_type)
+                .order_by(desc(func.count(AdminAction.action_id)))
+            )
+            actions_by_type = {row[0]: row[1] for row in type_result.all()}
+            
+            # Average execution time
+            avg_time_result = await session.execute(
+                select(func.avg(AdminAction.execution_time_ms))
+                .where(and_(
+                    AdminAction.timestamp >= cutoff_time,
+                    AdminAction.execution_time_ms.is_not(None)
+                ))
+            )
+            avg_execution_time = avg_time_result.scalar()
+            
+            return {
+                "period_hours": hours,
+                "total_actions": total_actions,
+                "successful_actions": successful_actions,
+                "failed_actions": failed_actions,
+                "success_rate": (successful_actions / total_actions * 100) if total_actions > 0 else 0,
+                "actions_by_type": actions_by_type,
+                "avg_execution_time_ms": float(avg_execution_time) if avg_execution_time else None,
+                "timestamp": datetime.utcnow().isoformat()
             }
 
 # Global Singleton Instance - to be imported throughout the application
