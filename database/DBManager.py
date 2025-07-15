@@ -550,6 +550,66 @@ class DBManager:
             _logger.info(f"Signal {signal_id} re-approved. Status: {db_signal.status}. Event logged.")
             return True
 
+    async def has_subsequent_sell_signal(self, ticker: str, buy_signal_timestamp: datetime, window_seconds: int = 300) -> bool:
+        """
+        Checks if there's a SELL signal for the ticker that came AFTER the given BUY signal timestamp.
+        This is used to avoid reprocessing BUY signals when the robot has already decided to exit the position.
+        
+        Args:
+            ticker: The ticker symbol to check
+            buy_signal_timestamp: Timestamp of the BUY signal being considered for reprocessing
+            window_seconds: Time window to search for subsequent SELL signals (default 300s = 5min)
+            
+        Returns:
+            True if a subsequent SELL signal exists, False otherwise
+        """
+        async with self.get_session() as session:
+            
+            # Calculate time window for search
+            search_end_time = buy_signal_timestamp + timedelta(seconds=window_seconds)
+            
+            # Query for SELL signals after the BUY signal timestamp
+            stmt = (
+                select(Signal)
+                .where(
+                    Signal.normalised_ticker == ticker.upper(),
+                    Signal.created_at > buy_signal_timestamp,
+                    Signal.created_at <= search_end_time
+                )
+                .order_by(Signal.created_at)
+            )
+
+            result = await session.execute(stmt)
+            subsequent_signals = result.scalars().all()
+
+            # Check if any of these signals is a SELL signal
+            for sig in subsequent_signals:
+                # Check if this is a SELL signal using comprehensive logic
+                side = (sig.side or "").lower().strip()
+                signal_type = (sig.signal_type or "").lower().strip()
+                
+                # Check original_signal for action
+                action = ""
+                if sig.original_signal and isinstance(sig.original_signal, dict):
+                    action = (sig.original_signal.get("action") or "").lower().strip()
+                
+                # Sell indicators
+                sell_indicators = {"sell", "short", "exit", "close", "bear"}
+                
+                # Check if this is a SELL signal
+                if (side in sell_indicators or 
+                    signal_type in sell_indicators or 
+                    action in sell_indicators):
+                    
+                    _logger.debug(f"Found subsequent SELL signal for {ticker}: "
+                                f"signal_id={sig.signal_id}, created_at={sig.created_at}, "
+                                f"side='{side}', action='{action}', status={sig.status}")
+                    return True
+
+            _logger.debug(f"No subsequent SELL signals found for {ticker} after {buy_signal_timestamp} "
+                        f"within {window_seconds}s window")
+            return False
+
     async def get_audit_trail_count(
         self, 
         start_time: Optional[datetime] = None,

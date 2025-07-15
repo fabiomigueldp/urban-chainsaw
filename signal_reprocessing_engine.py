@@ -406,6 +406,45 @@ class SignalReprocessingEngine:
         
         _logger.debug(f"[ReprocessingEngine:{ticker}:{signal_id}] Validated as BUY signal")
         
+        # Step 2.5: Check for subsequent SELL signals (temporal chronology filter)
+        try:
+            # Get current finviz config to check if chronology filter is enabled
+            from finviz_engine import FinvizEngine
+            from main import shared_state
+            
+            finviz_engine = shared_state.get("finviz_engine")
+            if finviz_engine and hasattr(finviz_engine, '_current_config'):
+                config = finviz_engine._current_config
+                if config and getattr(config, 'respect_sell_chronology_enabled', True):
+                    window_seconds = getattr(config, 'sell_chronology_window_seconds', 300)
+                    buy_timestamp = signal_data.get("created_at")
+                    
+                    if buy_timestamp:
+                        has_subsequent_sell = await self.db_manager.has_subsequent_sell_signal(
+                            ticker, buy_timestamp, window_seconds
+                        )
+                        
+                        if has_subsequent_sell:
+                            _logger.info(f"[ReprocessingEngine:{ticker}:{signal_id}] Skipping BUY reprocessing - subsequent SELL signal exists (respecting chronology)")
+                            return SignalReprocessingOutcome(
+                                signal_id=signal_id,
+                                ticker=ticker,
+                                status=ReprocessingStatus.SKIPPED_NON_BUY,
+                                success=False,
+                                error_message="BUY signal obsoleted by subsequent SELL signal"
+                            )
+                        else:
+                            _logger.debug(f"[ReprocessingEngine:{ticker}:{signal_id}] No subsequent SELL found - proceeding with BUY reprocessing")
+                    else:
+                        _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Missing created_at timestamp - skipping chronology check")
+                else:
+                    _logger.debug(f"[ReprocessingEngine:{ticker}:{signal_id}] Sell chronology filter disabled - proceeding")
+            else:
+                _logger.debug(f"[ReprocessingEngine:{ticker}:{signal_id}] No finviz config found - skipping chronology check")
+                
+        except Exception as e:
+            _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Error checking sell chronology (continuing): {e}")
+        
         # Step 3: Re-approve in database
         try:
             reapproved = await self.db_manager.reapprove_signal(

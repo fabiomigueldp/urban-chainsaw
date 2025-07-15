@@ -39,6 +39,8 @@ class FinvizConfig(BaseModel):
     refresh: int = DEFAULT_TICKER_REFRESH_SEC # seconds
     reprocess_enabled: bool = Field(default=False, description="Enable reprocessing of recently rejected signals for new Top-N tickers.")
     reprocess_window_seconds: int = Field(default=300, description="Time window in seconds to look back for rejected signals to reprocess.")
+    respect_sell_chronology_enabled: bool = Field(default=True, description="Skip reprocessing BUY signals if subsequent SELL signals exist.")
+    sell_chronology_window_seconds: int = Field(default=300, description="Time window in seconds to look for subsequent SELL signals.")
 
     @validator('top_n')
     def top_n_must_be_positive(cls, v):
@@ -56,6 +58,12 @@ class FinvizConfig(BaseModel):
     def reprocess_window_must_be_non_negative(cls, v):
         if v < 0:
             raise ValueError('reprocess_window_seconds cannot be negative')
+        return v
+
+    @validator('sell_chronology_window_seconds')
+    def sell_chronology_window_must_be_non_negative(cls, v):
+        if v < 0:
+            raise ValueError('sell_chronology_window_seconds cannot be negative')
         return v
 
 class FinvizEngine:
@@ -293,9 +301,11 @@ class FinvizEngine:
                 top_n=config_data["top_n"],
                 refresh=config_data.get("refresh_interval_sec", DEFAULT_TICKER_REFRESH_SEC),
                 reprocess_enabled=config_data.get("reprocess_enabled", False),
-                reprocess_window_seconds=config_data.get("reprocess_window_seconds", 300)
+                reprocess_window_seconds=config_data.get("reprocess_window_seconds", 300),
+                respect_sell_chronology_enabled=config_data.get("respect_sell_chronology_enabled", True),
+                sell_chronology_window_seconds=config_data.get("sell_chronology_window_seconds", 300)
             )
-            _logger.info(f"Successfully loaded config: URL={self._current_config.url}, TopN={self._current_config.top_n}, Refresh={self._current_config.refresh}s, ReprocessEnabled={self._current_config.reprocess_enabled}, ReprocessWindow={self._current_config.reprocess_window_seconds}s")
+            _logger.info(f"Successfully loaded config: URL={self._current_config.url}, TopN={self._current_config.top_n}, Refresh={self._current_config.refresh}s, ReprocessEnabled={self._current_config.reprocess_enabled}, ReprocessWindow={self._current_config.reprocess_window_seconds}s, RespectSellChronology={self._current_config.respect_sell_chronology_enabled}, SellChronologyWindow={self._current_config.sell_chronology_window_seconds}s")
         except Exception as e:
             _logger.error(f"Error loading config from {FINVIZ_CONFIG_FILE}: {e}. Engine will use last known good config or defaults if available.")
             if not self._current_config: # If there's no config at all (e.g. first run)
@@ -328,6 +338,17 @@ class FinvizEngine:
             if "reprocess_window_seconds" in new_config_data and new_config_data["reprocess_window_seconds"] is not None:
                 proposed_data["reprocess_window_seconds"] = new_config_data["reprocess_window_seconds"]
             elif "reprocess_window_seconds" not in proposed_data: # Ensure default if not present
+                proposed_data["reprocess_window_seconds"] = self._current_config.reprocess_window_seconds if self._current_config else 300
+
+            # Handle new sell chronology fields
+            if "respect_sell_chronology_enabled" in new_config_data and new_config_data["respect_sell_chronology_enabled"] is not None:
+                proposed_data["respect_sell_chronology_enabled"] = new_config_data["respect_sell_chronology_enabled"]
+            elif "respect_sell_chronology_enabled" not in proposed_data: # Ensure default if not present
+                proposed_data["respect_sell_chronology_enabled"] = self._current_config.respect_sell_chronology_enabled if self._current_config else True
+
+            if "sell_chronology_window_seconds" in new_config_data and new_config_data["sell_chronology_window_seconds"] is not None:
+                proposed_data["sell_chronology_window_seconds"] = new_config_data["sell_chronology_window_seconds"]
+            elif "sell_chronology_window_seconds" not in proposed_data: # Ensure default if not present
                 proposed_data["reprocess_window_seconds"] = self._current_config.reprocess_window_seconds if self._current_config else 300
 
 
