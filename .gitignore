@@ -1,6 +1,3 @@
-# Environment variables (contains sensitive URLs and tokens)
-.env
-
 # Configuration files (contain live URLs and settings)
 finviz_config.json
 webhook_config.json
