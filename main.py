@@ -67,113 +67,39 @@ from database.simple_models import SignalStatusEnum, SignalLocationEnum
 # ---------------------------------------------------------------------------- #
 
 def get_current_metrics() -> Dict[str, Any]:
-    """Get current metrics with real-time data from database and queue sizes."""
+    """Get current metrics with database as source of truth."""
     try:
-        # Get real queue sizes
+        # Always get fresh data from database for persistent metrics
+        db_analytics = asyncio.run(db_manager.get_system_analytics())
+        
+        # Get real-time queue sizes from memory
         processing_queue_size = queue.qsize() if queue else 0
         approved_queue_size = approved_signal_queue.qsize() if approved_signal_queue else 0
         
-        # Check if we should force memory metrics (after reset)
-        force_memory = shared_state.get("signal_metrics", {}).get("_force_memory_metrics", False)
-        reset_timestamp = shared_state.get("signal_metrics", {}).get("_reset_timestamp", 0)
-        
-        # Clear force flag after 30 seconds to allow DB cache to rebuild
-        if force_memory and time.time() - reset_timestamp > 30:
-            shared_state["signal_metrics"]["_force_memory_metrics"] = False
-            _logger.info("🔄 METRICS: Clearing force_memory_metrics flag - allowing DB cache to rebuild")
-            force_memory = False
-        
-        # Try to use cached database analytics if available and recent (unless forced to use memory)
-        db_analytics = {}
-        cache_max_age = 30  # seconds - if cache is older than this, consider it stale
-        
-        if not force_memory and (hasattr(get_current_metrics, '_cached_analytics') and 
-            hasattr(get_current_metrics, '_cached_timestamp')):
-            
-            cache_age = time.time() - get_current_metrics._cached_timestamp
-            cached_data = get_current_metrics._cached_analytics
-            
-            # Use cached data if it exists and is not too old
-            if cached_data and cache_age < cache_max_age:
-                db_analytics = cached_data
-                _logger.debug(f"📊 METRICS: Using cached database metrics (age: {cache_age:.1f}s)")
-            else:
-                _logger.debug(f"⏰ METRICS: Cache too old ({cache_age:.1f}s) or empty, will use memory fallback")
-        elif force_memory:
-            _logger.debug(f"🎯 METRICS: Force memory mode active (reset {time.time() - reset_timestamp:.1f}s ago)")
-        else:
-            _logger.debug("🔍 METRICS: No cached metrics available, will use memory fallback")
-        
-        # Use database data if available (persistent across restarts), otherwise fall back to memory
-        if db_analytics and not force_memory:
-            # Database analytics provide persistent counters for some metrics
-            # BUT: For real-time metrics that are incremented in memory (received, approved, rejected),
-            # we should ALWAYS use memory values to ensure consistency with how they're incremented
-            memory_metrics = shared_state["signal_metrics"]
-            
-            metrics = {
-                # ALWAYS use memory for these real-time counters (like signals_received and signals_rejected)
-                "signals_received": memory_metrics["signals_received"],
-                "signals_approved": memory_metrics["signals_approved"],  # FIXED: Now uses memory like others!
-                "signals_rejected": memory_metrics["signals_rejected"],
-                
-                # Use database for these aggregated metrics
-                "signals_forwarded_success": db_analytics.get("forwarded_success", 0),
-                "signals_forwarded_error": db_analytics.get("forwarded_error", 0),
-                
-                # Always use memory for these real-time values
-                "metrics_start_time": memory_metrics["metrics_start_time"],
-                "approved_queue_size": approved_queue_size,
-                "processing_queue_size": processing_queue_size,
-                "processing_workers_active": memory_metrics["processing_workers_active"],
-                "forwarding_workers_active": memory_metrics["forwarding_workers_active"],
-                "data_source": "hybrid_memory_db"
-            }
-            _logger.debug(f"📊 METRICS: Using HYBRID metrics - approved: {metrics['signals_approved']} (from memory)")
-        else:
-            # Fallback to memory metrics (these are reset on restart)
-            metrics = shared_state["signal_metrics"].copy()
-            metrics["approved_queue_size"] = approved_queue_size
-            metrics["processing_queue_size"] = processing_queue_size
-            metrics["data_source"] = "memory_fallback" if not force_memory else "memory_forced"
-            _logger.debug(f"🧠 METRICS: Using MEMORY metrics - approved: {metrics['signals_approved']} (source: {metrics['data_source']})")
-        
+        # Combine database metrics with real-time queue data
+        metrics = {
+            "signals_received": db_analytics.get("total_signals", 0),
+            "signals_approved": db_analytics.get("approved_signals", 0),
+            "signals_rejected": db_analytics.get("rejected_signals", 0),
+            "signals_forwarded_success": db_analytics.get("forwarded_success", 0),
+            "signals_forwarded_error": db_analytics.get("forwarded_error", 0),
+            "approved_queue_size": approved_queue_size,
+            "processing_queue_size": processing_queue_size,
+            "processing_workers_active": shared_state["signal_metrics"]["processing_workers_active"],
+            "forwarding_workers_active": shared_state["signal_metrics"]["forwarding_workers_active"],
+            "metrics_start_time": shared_state["signal_metrics"]["metrics_start_time"],
+            "data_source": "database_realtime"
+        }
         return metrics
     except Exception as e:
-        _logger.error(f"❌ METRICS: Error getting current metrics: {e}")
-        # Return safe defaults
-        default_metrics = signal_metrics.copy()
-        default_metrics["approved_queue_size"] = 0
-        default_metrics["processing_queue_size"] = 0
-        default_metrics["data_source"] = "error_fallback"
-        return default_metrics
+        # Fallback to memory only if database fails
+        memory_metrics = shared_state["signal_metrics"].copy()
+        memory_metrics["approved_queue_size"] = approved_queue_size
+        memory_metrics["processing_queue_size"] = processing_queue_size
+        memory_metrics["data_source"] = "memory_fallback"
+        _logger.error(f"❌ METRICS: Error getting database metrics, using memory fallback: {e}")
+        return memory_metrics
 
-async def update_cached_metrics():
-    """Update cached metrics from database (called by periodic task)."""
-    try:
-        # Skip updating cache if we're in force memory mode (recently reset)
-        force_memory = shared_state.get("signal_metrics", {}).get("_force_memory_metrics", False)
-        if force_memory:
-            _logger.debug("⏭️ CACHE UPDATE: Skipping cache update (force memory mode active)")
-            return
-            
-        _logger.debug("🔄 CACHE UPDATE: Updating cached metrics from database...")
-        db_analytics = await db_manager.get_system_analytics()
-        
-        # Store cached analytics with timestamp
-        get_current_metrics._cached_analytics = db_analytics
-        get_current_metrics._cached_timestamp = time.time()
-        
-        _logger.debug(f"✅ CACHE UPDATE: Updated cached metrics - total: {db_analytics.get('total_signals', 0)}, approved: {db_analytics.get('approved_signals', 0)}")
-        
-    except Exception as e:
-        _logger.error(f"❌ CACHE UPDATE: Error updating cached metrics from database: {e}")
-        # Don't fail completely - keep using existing cache if available
-        if not hasattr(get_current_metrics, '_cached_analytics'):
-            # If no cache exists, create empty cache so get_current_metrics knows to use memory fallback
-            get_current_metrics._cached_analytics = {}
-            get_current_metrics._cached_timestamp = time.time()
-            _logger.warning("🔧 CACHE UPDATE: Created empty cache as fallback")
 
 # ---------------------------------------------------------------------------- #
 # Globals & Shared State                                                       #
@@ -982,12 +908,6 @@ async def _startup() -> None:
             try:
                 await asyncio.sleep(5)  # Update every 5 seconds for real-time data
                 
-                # Update cached metrics from database
-                try:
-                    await update_cached_metrics()
-                except Exception as cache_error:
-                    _logger.error(f"Error updating cached metrics: {cache_error}")
-                
                 # Only send updates if there are admin connections
                 if len(comm_engine.active_connections) > 0:
                     # Send comprehensive status update with real-time database data
@@ -1288,18 +1208,7 @@ async def reset_signal_metrics(request: Request, payload: dict = Body(...)):
     shared_state["signal_metrics"]["forwarding_workers_active"] = 0  # Reset active forwarding workers counter
     shared_state["signal_metrics"]["metrics_start_time"] = time.time()
     
-    # CRITICAL FIX: Invalidate database cache to force using memory metrics after reset
-    # This ensures that the reset is immediately visible in the UI
-    if hasattr(get_current_metrics, '_cached_analytics'):
-        delattr(get_current_metrics, '_cached_analytics')
-        _logger.info("🗑️ METRICS RESET: Database cache invalidated - will use memory metrics")
-    
-    if hasattr(get_current_metrics, '_cached_timestamp'):
-        delattr(get_current_metrics, '_cached_timestamp')
-    
-    # Add a flag to indicate this was an intentional reset (not a DB failure)
-    shared_state["signal_metrics"]["_reset_timestamp"] = time.time()
-    shared_state["signal_metrics"]["_force_memory_metrics"] = True
+    _logger.info("✅ METRICS RESET: All metrics have been reset to zero")
     
     # Reset webhook rate limiter metrics if available
     rate_limiter: Optional[WebhookRateLimiter] = shared_state.get("webhook_rate_limiter_instance")
@@ -1431,80 +1340,40 @@ async def get_system_info():
             "rate_limit_tokens_available": engine.rate_limit_semaphore._value if hasattr(engine.rate_limit_semaphore, '_value') else "unknown",
             "concurrency_slots_available": engine.concurrency_semaphore._value if hasattr(engine.concurrency_semaphore, '_value') else "unknown"
         })
-      # Get REAL-TIME metrics from database with intelligent caching
+    
+    # Get real-time metrics using simplified function
+    signal_processing_metrics = get_current_metrics()
+    
+    # Calculate additional metrics for display
     try:
-        # Check if we have fresh cached data (less than 5 seconds old)
-        cache_key = "system_info_cache"
-        cache_timeout = 5  # seconds
-        current_time_cache = time.time()
+        total_processed = signal_processing_metrics["signals_received"]
+        approved_count = signal_processing_metrics["signals_approved"]
         
-        if (cache_key in shared_state and 
-            "timestamp" in shared_state[cache_key] and 
-            current_time_cache - shared_state[cache_key]["timestamp"] < cache_timeout):
-            # Use cached data
-            db_analytics = shared_state[cache_key]["data"]
-            data_source = "database_cached"
-            _logger.debug("Using cached database analytics for system-info")
-        else:
-            # Fetch fresh data from database
-            db_analytics = await db_manager.get_system_analytics()
-            # Cache the data
-            shared_state[cache_key] = {
-                "data": db_analytics,
-                "timestamp": current_time_cache
-            }
-            data_source = "database_fresh"
-            _logger.debug("Fetched fresh database analytics for system-info")
-        
-        # Calculate uptime from database start time
+        # Calculate uptime from metrics start time
         current_time = asyncio.get_event_loop().time()
         start_time = shared_state["signal_metrics"]["metrics_start_time"]
         uptime_seconds = current_time - start_time if start_time else 0
         
-        # Use real data from database
-        total_processed = db_analytics.get("total_signals", 0)
-        approved_count = db_analytics.get("approved_signals", 0)
-        
+        # Calculate percentage rates
         approval_rate = (approved_count / total_processed * 100) if total_processed > 0 else 0
-        forward_success_rate = (db_analytics.get("forwarded_success", 0) / (db_analytics.get("forwarded_success", 0) + db_analytics.get("forwarded_error", 0)) * 100) if (db_analytics.get("forwarded_success", 0) + db_analytics.get("forwarded_error", 0)) > 0 else 0
+        forward_success_rate = (signal_processing_metrics["signals_forwarded_success"] / (signal_processing_metrics["signals_forwarded_success"] + signal_processing_metrics["signals_forwarded_error"]) * 100) if (signal_processing_metrics["signals_forwarded_success"] + signal_processing_metrics["signals_forwarded_error"]) > 0 else 0
         
-        # Real-time signal processing metrics from database (persistent across restarts)
-        signal_processing_metrics = {
-            "signals_received": total_processed,
-            "signals_approved": approved_count,
-            "signals_rejected": db_analytics.get("rejected_signals", 0),
-            "signals_forwarded_success": db_analytics.get("forwarded_success", 0),
-            "signals_forwarded_error": db_analytics.get("forwarded_error", 0),
+        # Add calculated metrics to the response
+        signal_processing_metrics.update({
             "approval_rate_percent": round(approval_rate, 2),
             "forward_success_rate_percent": round(forward_success_rate, 2),
-            "signals_per_minute": round(total_processed / (uptime_seconds / 60), 2) if uptime_seconds > 0 else 0,
-            "metrics_start_time": start_time,
-            "forwarding_workers_active": shared_state["signal_metrics"]["forwarding_workers_active"],  # Queue state
-            "data_source": data_source
-        }
+            "signals_per_minute": round(total_processed / (uptime_seconds / 60), 2) if uptime_seconds > 0 else 0
+        })
         
-    except Exception as db_error:
-        _logger.error(f"Error getting analytics from database: {db_error}")
-        # Fallback to memory metrics if database fails
-        metrics = shared_state["signal_metrics"]
-        total_processed = metrics["signals_received"]
-        approved_count = metrics["signals_approved"]
-        
-        current_time = asyncio.get_event_loop().time()
-        start_time = shared_state["signal_metrics"]["metrics_start_time"]
-        uptime_seconds = current_time - start_time if start_time else 0
-        
-        approval_rate = (approved_count / total_processed * 100) if total_processed > 0 else 0
-        forward_success_rate = (metrics["signals_forwarded_success"] / (metrics["signals_forwarded_success"] + metrics["signals_forwarded_error"]) * 100) if (metrics["signals_forwarded_success"] + metrics["signals_forwarded_error"]) > 0 else 0
-        
-        signal_processing_metrics = {
-            **metrics,
-            "approval_rate_percent": round(approval_rate, 2),
-            "forward_success_rate_percent": round(forward_success_rate, 2),
-            "signals_per_minute": round(total_processed / (uptime_seconds / 60), 2) if uptime_seconds > 0 else 0,
-            "data_source": "memory_fallback"
-        }
-      # Webhook rate limiter metrics
+    except Exception as calc_error:
+        _logger.error(f"Error calculating additional metrics: {calc_error}")
+        signal_processing_metrics.update({
+            "approval_rate_percent": 0,
+            "forward_success_rate_percent": 0,
+            "signals_per_minute": 0
+        })
+    
+    # Webhook rate limiter metrics
     rate_limiter: Optional[WebhookRateLimiter] = shared_state.get("webhook_rate_limiter_instance")
     webhook_rate_limiter_info = {}
     if rate_limiter:

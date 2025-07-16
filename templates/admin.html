@@ -2846,67 +2846,6 @@
         // SYSTEM STATUS AND WEBSOCKET FUNCTIONS
         // ============================================================================
         
-        // Load system status
-        async function loadSystemStatus() {
-            console.log('Loading system status...');
-            try {
-                const response = await fetch('/admin/system-info');
-                console.log('System status response:', response.status, response.ok);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('System status data:', data);
-                    updateSystemMetrics(data);
-                } else {
-                    console.error('System status API error:', response.status, response.statusText);
-                }
-            } catch (error) {
-                console.error('Error loading system status:', error);
-            }
-        }
-        
-        // Update system metrics in the dashboard
-        function updateSystemMetrics(data) {
-            // Update signal metrics
-            if (data.signal_metrics) {
-                const metrics = data.signal_metrics;
-                document.getElementById('signalsReceived').textContent = metrics.signals_received || '-';
-                document.getElementById('signalsApproved').textContent = metrics.signals_approved || '-';
-                document.getElementById('signalsRejected').textContent = metrics.signals_rejected || '-';
-                document.getElementById('signalsForwarded').textContent = metrics.signals_forwarded || '-';
-            }
-            
-            // Update queue status
-            if (data.queue_info) {
-                const queue = data.queue_info;
-                document.getElementById('processingQueueSize').textContent = queue.processing_queue_size || '-';
-                document.getElementById('approvedQueueSize').textContent = queue.approved_queue_size || '-';
-            }
-            
-            // Update system info
-            if (data.system_info) {
-                const system = data.system_info;
-                const engineStatus = document.getElementById('engineStatus');
-                const rateLimiterStatus = document.getElementById('rateLimiterStatus');
-                const tickerCount = document.getElementById('tickerCount');
-                const uptime = document.getElementById('uptime');
-                
-                if (engineStatus) {
-                    engineStatus.textContent = system.finviz_engine?.status || '-';
-                    engineStatus.className = `badge ${system.finviz_engine?.status === 'running' ? 'bg-success' : 'bg-danger'}`;
-                }
-                
-                if (rateLimiterStatus) {
-                    const rlStatus = system.webhook_rate_limiter?.paused ? 'paused' : 'running';
-                    rateLimiterStatus.textContent = rlStatus;
-                    rateLimiterStatus.className = `badge ${rlStatus === 'running' ? 'bg-success' : 'bg-warning'}`;
-                }
-                
-                if (tickerCount) tickerCount.textContent = system.finviz_engine?.top_n_count || '-';
-                if (uptime) uptime.textContent = system.uptime || '-';
-            }
-        }
-        
         // Show alert message
         function showAlert(message, type = 'info') {
             const alertContainer = document.getElementById('alertContainer');
@@ -2984,7 +2923,20 @@
             
             // Handle system info updates
             if (data.type === 'system_info') {
-                updateSystemMetrics(data.data);
+                // Update metrics if available
+                if (data.data.metrics) {
+                    updateMetrics(data.data.metrics);
+                }
+                
+                // Update system status if available  
+                if (data.data.system_info) {
+                    updateSystemStatus(data.data.system_info);
+                    updateActiveStrategyIndicator(data.data.system_info.active_strategy);
+                    updateReprocessingCard(data.data.system_info);
+                }
+                
+                // Update charts with current data
+                updateChartsWithData();
             }
             
             // Handle Finviz strategy changes
