@@ -12,37 +12,37 @@ Este documento descreve as tarefas necessárias para diagnosticar e corrigir ess
 
 ### 1. Verificar a Existência e o Conteúdo dos Arquivos de Configuração
 
-- [ ] **Verificar `system_config.py`**:
-  - [ ] Confirmar se o arquivo `system_config.py` existe no diretório raiz do projeto.
-  - [ ] Revisar o conteúdo de `system_config.py` para garantir que não há erros de sintaxe.
-  - [ ] Certificar-se de que a função `get_sell_all_cleanup_config` está definida corretamente e retorna um dicionário com as chaves `enabled` e `lifetime_hours`.
+- [x] **Verificar `system_config.py`**:
+  - [x] Confirmar se o arquivo `system_config.py` existe no diretório raiz do projeto.
+  - [x] Revisar o conteúdo de `system_config.py` para garantir que não há erros de sintaxe.
+  - [x] Certificar-se de que a função `get_sell_all_cleanup_config` está definida corretamente e retorna um dicionário com as chaves `enabled` e `lifetime_hours`.
 
-- [ ] **Verificar `signal_reprocessing_engine.py`**:
-  - [ ] Confirmar se o arquivo `signal_reprocessing_engine.py` existe no diretório raiz.
-  - [ ] Revisar o conteúdo de `signal_reprocessing_engine.py` para garantir que não há erros de sintaxe.
-  - [ ] Verificar se a classe `SignalReprocessingEngine` e seus métodos, especialmente `get_health_status`, estão implementados corretamente.
+- [x] **Verificar `signal_reprocessing_engine.py`**:
+  - [x] Confirmar se o arquivo `signal_reprocessing_engine.py` existe no diretório raiz.
+  - [x] Revisar o conteúdo de `signal_reprocessing_engine.py` para garantir que não há erros de sintaxe.
+  - [x] Verificar se a classe `SignalReprocessingEngine` e seus métodos, especialmente `get_health_status`, estão implementados corretamente.
 
 ### 2. Garantir o Tratamento Robusto de Erros nas Rotas do Backend
 
-- [ ] **Refatorar a Rota `/admin/system-info`**:
+- [x] **Refatorar a Rota `/admin/system-info`**:
   - [x] Envolver as chamadas a `get_current_metrics()`, `load_finviz_config()`, e `get_sell_all_cleanup_config()` em blocos `try...except`.
-  - [ ] Em caso de exceção, registrar o erro detalhado no log (`_logger.error`) para facilitar a depuração futura.
-  - [ ] Retornar um dicionário com valores padrão ou de fallback em caso de erro, em vez de deixar a exceção subir e causar um erro 500. Isso garantirá que o frontend sempre receba uma resposta JSON válida.
+  - [x] Em caso de exceção, registrar o erro detalhado no log (`_logger.error`) para facilitar a depuração futura.
+  - [x] Retornar um dicionário com valores padrão ou de fallback em caso de erro, em vez de deixar a exceção subir e causar um erro 500. Isso garantirá que o frontend sempre receba uma resposta JSON válida.
 
-- [ ] **Refatorar a Rota `/admin/reprocessing/health`**:
+- [x] **Refatorar a Rota `/admin/reprocessing/health`**:
   - [x] Envolver a chamada ao `SignalReprocessingEngine` e ao método `get_health_status()` em um bloco `try...except`.
-  - [ ] Capturar exceções específicas, como `ImportError` (se o módulo não estiver disponível) e exceções genéricas.
-  - [ ] Retornar um objeto JSON com um status de erro claro (ex: `{"status": "MODULE_NOT_AVAILABLE"}`), em vez de um erro 500.
+  - [x] Capturar exceções específicas, como `ImportError` (se o módulo não estiver disponível) e exceções genéricas.
+  - [x] Retornar um objeto JSON com um status de erro claro (ex: `{"status": "MODULE_NOT_AVAILABLE"}`), em vez de um erro 500.
 
-- [ ] **Refatorar a Rota `/admin/sell-all/config`**:
+- [x] **Refatorar a Rota `/admin/sell-all/config`**:
   - [x] Envolver a chamada a `get_sell_all_cleanup_config()` em um bloco `try...except`.
-  - [ ] Em caso de erro, registrar a exceção e retornar uma resposta JSON com um status de erro e uma mensagem descritiva.
+  - [x] Em caso de erro, registrar a exceção e retornar uma resposta JSON com um status de erro e uma mensagem descritiva.
 
 ### 3. Implementar o Arquivo `system_config.py` (se ausente)
 
-- [ ] **Criar o arquivo `system_config.py`**:
-  - [ ] Se o arquivo não existir, criá-lo no diretório raiz.
-  - [ ] Adicionar o seguinte conteúdo para fornecer uma implementação padrão e segura para a configuração de limpeza da lista "Sell All":
+- [x] **Criar o arquivo `system_config.py`**:
+  - [x] Se o arquivo não existir, criá-lo no diretório raiz.
+  - [x] Adicionar o seguinte conteúdo para fornecer uma implementação padrão e segura para a configuração de limpeza da lista "Sell All":
     ```python
     import json
     import os
@@ -75,12 +75,12 @@ Este documento descreve as tarefas necessárias para diagnosticar e corrigir ess
 
 ### 4. Validar as Correções e Finalizar
 
-- [ ] **Testar o Painel de Administração**:
-  - [ ] Após aplicar as correções, iniciar o servidor e acessar o painel de administração.
-  - [ ] Verificar se todas as seções (System Status, Cleanup Config, Reprocessing Health) carregam sem erros.
-  - [ ] Confirmar no console do navegador que não há mais erros 500 ou erros de parsing de JSON.
-- [ ] **Revisar os Logs do Servidor**:
-  - [ ] Verificar os logs do servidor para garantir que não há mais exceções não tratadas sendo registradas.
+- [x] **Testar o Painel de Administração**:
+  - [x] Após aplicar as correções, iniciar o servidor e acessar o painel de administração.
+  - [x] Verificar se todas as seções (System Status, Cleanup Config, Reprocessing Health) carregam sem erros.
+  - [x] Confirmar no console do navegador que não há mais erros 500 ou erros de parsing de JSON.
+- [x] **Revisar os Logs do Servidor**:
+  - [x] Verificar os logs do servidor para garantir que não há mais exceções não tratadas sendo registradas.
 
 ---
 
