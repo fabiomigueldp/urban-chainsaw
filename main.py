@@ -1321,128 +1321,135 @@ async def trigger_manual_refresh(request: Request, payload: dict = Body(...)):
 @app.get("/admin/system-info")
 async def get_system_info():
     """Get detailed system information including queue status and performance metrics."""
-    engine: Optional[FinvizEngine] = shared_state.get("finviz_engine_instance")
-    
-    # Queue information
-    signal_queue = shared_state.get("signal_queue", None)
-    queue_info = {
-        "current_size": signal_queue.qsize() if signal_queue else 0,
-        "max_size": signal_queue.maxsize if signal_queue else "unknown",
-        "is_full": signal_queue.full() if signal_queue else False,
-        "is_empty": signal_queue.empty() if signal_queue else True
-    } if signal_queue else {"status": "not_initialized"}
-    
-    # Engine detailed metrics
-    engine_metrics = {}
-    if engine:
-        engine_metrics = engine.get_status_metrics()
-        engine_metrics.update({
-            "rate_limit_tokens_available": engine.rate_limit_semaphore._value if hasattr(engine.rate_limit_semaphore, '_value') else "unknown",
-            "concurrency_slots_available": engine.concurrency_semaphore._value if hasattr(engine.concurrency_semaphore, '_value') else "unknown"
-        })
-    
-    # Get real-time metrics using simplified function
-    signal_processing_metrics = get_current_metrics()
-    
-    # Calculate additional metrics for display
     try:
-        total_processed = signal_processing_metrics["signals_received"]
-        approved_count = signal_processing_metrics["signals_approved"]
+        engine: Optional[FinvizEngine] = shared_state.get("finviz_engine_instance")
+
+        # Queue information
+        signal_queue = shared_state.get("signal_queue", None)
+        queue_info = {
+            "current_size": signal_queue.qsize() if signal_queue else 0,
+            "max_size": signal_queue.maxsize if signal_queue else "unknown",
+            "is_full": signal_queue.full() if signal_queue else False,
+            "is_empty": signal_queue.empty() if signal_queue else True
+        } if signal_queue else {"status": "not_initialized"}
+
+        # Engine detailed metrics
+        engine_metrics = {}
+        if engine:
+            engine_metrics = engine.get_status_metrics()
+            engine_metrics.update({
+                "rate_limit_tokens_available": engine.rate_limit_semaphore._value if hasattr(engine.rate_limit_semaphore, '_value') else "unknown",
+                "concurrency_slots_available": engine.concurrency_semaphore._value if hasattr(engine.concurrency_semaphore, '_value') else "unknown"
+            })
         
-        # Calculate uptime from metrics start time
-        current_time = asyncio.get_event_loop().time()
-        start_time = shared_state["signal_metrics"]["metrics_start_time"]
-        uptime_seconds = current_time - start_time if start_time else 0
-        
-        # Calculate percentage rates
-        approval_rate = (approved_count / total_processed * 100) if total_processed > 0 else 0
-        forward_success_rate = (signal_processing_metrics["signals_forwarded_success"] / (signal_processing_metrics["signals_forwarded_success"] + signal_processing_metrics["signals_forwarded_error"]) * 100) if (signal_processing_metrics["signals_forwarded_success"] + signal_processing_metrics["signals_forwarded_error"]) > 0 else 0
-        
-        # Add calculated metrics to the response
-        signal_processing_metrics.update({
-            "approval_rate_percent": round(approval_rate, 2),
-            "forward_success_rate_percent": round(forward_success_rate, 2),
-            "signals_per_minute": round(total_processed / (uptime_seconds / 60), 2) if uptime_seconds > 0 else 0
-        })
-        
-    except Exception as calc_error:
-        _logger.error(f"Error calculating additional metrics: {calc_error}")
-        signal_processing_metrics.update({
-            "approval_rate_percent": 0,
-            "forward_success_rate_percent": 0,
-            "signals_per_minute": 0
-        })
-    
-    # Webhook rate limiter metrics
-    rate_limiter: Optional[WebhookRateLimiter] = shared_state.get("webhook_rate_limiter_instance")
-    webhook_rate_limiter_info = {}
-    if rate_limiter:
+        # Get real-time metrics using simplified function
+        signal_processing_metrics = get_current_metrics()
+
+        # Calculate additional metrics for display
         try:
-            webhook_metrics = rate_limiter.get_metrics()
-            webhook_rate_limiter_info = {
-                "rate_limiting_enabled": webhook_metrics.get("rate_limiting_enabled", False),
-                "max_req_per_min": webhook_metrics.get("max_req_per_min", 0),
-                "tokens_available": webhook_metrics.get("tokens_available", 0),
-                "requests_made_this_minute": webhook_metrics.get("requests_made_this_minute", 0),
-                "total_requests_limited": webhook_metrics.get("total_requests_limited", 0),
-                "is_rate_limited": rate_limiter.is_rate_limited(),
-                "last_token_refresh": webhook_metrics.get("last_token_refresh", 0)
-            }
-        except Exception as e:
-            webhook_rate_limiter_info = {"status": "error", "message": str(e)}
-    else:
-        webhook_rate_limiter_info = {"status": "not_initialized"}
-    
-    # Get pause status for frontend compatibility
-    finviz_engine_paused = False
-    webhook_rate_limiter_paused = False
-    reprocess_enabled = False
-    
-    if engine:
-        finviz_engine_paused = engine.is_paused()
-    
-    if rate_limiter:
-        # Check if rate limiting is disabled (paused)
-        webhook_rate_limiter_paused = not rate_limiter.rate_limiting_enabled
-    
-    # Get reprocess status from finviz config
-    try:
-        finviz_config = load_finviz_config()
-        reprocess_enabled = finviz_config.get("reprocess_enabled", False)
-    except Exception as e:
-        _logger.warning(f"Could not load finviz config for reprocess status: {e}")
+            total_processed = signal_processing_metrics["signals_received"]
+            approved_count = signal_processing_metrics["signals_approved"]
+
+            # Calculate uptime from metrics start time
+            current_time = asyncio.get_event_loop().time()
+            start_time = shared_state["signal_metrics"]["metrics_start_time"]
+            uptime_seconds = current_time - start_time if start_time else 0
+
+            # Calculate percentage rates
+            approval_rate = (approved_count / total_processed * 100) if total_processed > 0 else 0
+            forward_success_rate = (signal_processing_metrics["signals_forwarded_success"] / (signal_processing_metrics["signals_forwarded_success"] + signal_processing_metrics["signals_forwarded_error"]) * 100) if (signal_processing_metrics["signals_forwarded_success"] + signal_processing_metrics["signals_forwarded_error"]) > 0 else 0
+
+            # Add calculated metrics to the response
+            signal_processing_metrics.update({
+                "approval_rate_percent": round(approval_rate, 2),
+                "forward_success_rate_percent": round(forward_success_rate, 2),
+                "signals_per_minute": round(total_processed / (uptime_seconds / 60), 2) if uptime_seconds > 0 else 0
+            })
+
+        except Exception as calc_error:
+            _logger.error(f"Error calculating additional metrics: {calc_error}")
+            signal_processing_metrics.update({
+                "approval_rate_percent": 0,
+                "forward_success_rate_percent": 0,
+                "signals_per_minute": 0
+            })
+
+        # Webhook rate limiter metrics
+        rate_limiter: Optional[WebhookRateLimiter] = shared_state.get("webhook_rate_limiter_instance")
+        webhook_rate_limiter_info = {}
+        if rate_limiter:
+            try:
+                webhook_metrics = rate_limiter.get_metrics()
+                webhook_rate_limiter_info = {
+                    "rate_limiting_enabled": webhook_metrics.get("rate_limiting_enabled", False),
+                    "max_req_per_min": webhook_metrics.get("max_req_per_min", 0),
+                    "tokens_available": webhook_metrics.get("tokens_available", 0),
+                    "requests_made_this_minute": webhook_metrics.get("requests_made_this_minute", 0),
+                    "total_requests_limited": webhook_metrics.get("total_requests_limited", 0),
+                    "is_rate_limited": rate_limiter.is_rate_limited(),
+                    "last_token_refresh": webhook_metrics.get("last_token_refresh", 0)
+                }
+            except Exception as e:
+                webhook_rate_limiter_info = {"status": "error", "message": str(e)}
+        else:
+            webhook_rate_limiter_info = {"status": "not_initialized"}
+
+        # Get pause status for frontend compatibility
+        finviz_engine_paused = False
+        webhook_rate_limiter_paused = False
         reprocess_enabled = False
-    
-    return {
-        "system_info": {
-            "uptime_seconds": uptime_seconds,
-            "worker_concurrency": settings.WORKER_CONCURRENCY,
-            "dest_webhook_url": str(settings.DEST_WEBHOOK_URL),
+
+        if engine:
+            finviz_engine_paused = engine.is_paused()
+
+        if rate_limiter:
+            # Check if rate limiting is disabled (paused)
+            webhook_rate_limiter_paused = not rate_limiter.rate_limiting_enabled
+
+        # Get reprocess status from finviz config
+        try:
+            finviz_config = load_finviz_config()
+            reprocess_enabled = finviz_config.get("reprocess_enabled", False)
+        except Exception as e:
+            _logger.warning(f"Could not load finviz config for reprocess status: {e}")
+            reprocess_enabled = False
+
+        return {
+            "system_info": {
+                "uptime_seconds": uptime_seconds,
+                "worker_concurrency": settings.WORKER_CONCURRENCY,
+                "dest_webhook_url": str(settings.DEST_WEBHOOK_URL),
+                "finviz_engine_paused": finviz_engine_paused,
+                "webhook_rate_limiter_paused": webhook_rate_limiter_paused,
+                "reprocess_enabled": reprocess_enabled,
+                "finviz_ticker_count": len(shared_state.get("tickers", set())),
+                "timestamp": time.time(),
+                "data_source": signal_processing_metrics.get("data_source", "unknown")
+            },
+            "metrics": signal_processing_metrics,
+            "queue": queue_info,
+            "engine": engine_metrics,
+            "finviz_config": {
+                "elite_enabled": settings.FINVIZ_USE_ELITE,
+                "max_requests_per_min": get_max_req_per_min(),
+                "max_concurrency": get_max_concurrency(),
+                "tickers_per_page": get_finviz_tickers_per_page()
+            },
+            "webhook_rate_limiter": webhook_rate_limiter_info,
+            # Compatibility fields - also keep at root level for backward compatibility
             "finviz_engine_paused": finviz_engine_paused,
             "webhook_rate_limiter_paused": webhook_rate_limiter_paused,
             "reprocess_enabled": reprocess_enabled,
             "finviz_ticker_count": len(shared_state.get("tickers", set())),
             "timestamp": time.time(),
             "data_source": signal_processing_metrics.get("data_source", "unknown")
-        },
-        "metrics": signal_processing_metrics,
-        "queue": queue_info,
-        "engine": engine_metrics,
-        "finviz_config": {
-            "elite_enabled": settings.FINVIZ_USE_ELITE,
-            "max_requests_per_min": get_max_req_per_min(),
-            "max_concurrency": get_max_concurrency(),
-            "tickers_per_page": get_finviz_tickers_per_page()
-        },
-        "webhook_rate_limiter": webhook_rate_limiter_info,
-        # Compatibility fields - also keep at root level for backward compatibility
-        "finviz_engine_paused": finviz_engine_paused,
-        "webhook_rate_limiter_paused": webhook_rate_limiter_paused,
-        "reprocess_enabled": reprocess_enabled,
-        "finviz_ticker_count": len(shared_state.get("tickers", set())),
-        "timestamp": time.time(),
-        "data_source": signal_processing_metrics.get("data_source", "unknown")
-    }
+        }
+    except Exception as e:
+        _logger.error(f"Error in get_system_info: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal Server Error", "error": str(e)},
+        )
 
 
 @app.post("/admin/order/sell-individual", status_code=status.HTTP_200_OK)
@@ -2323,7 +2330,7 @@ async def get_sell_all_config():
         config = get_sell_all_cleanup_config()
         return config
     except Exception as e:
-        _logger.error(f"Error getting sell-all config: {e}")
+        _logger.error(f"Error getting sell-all config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/admin/reprocessing/health")
@@ -2353,7 +2360,7 @@ async def get_reprocessing_health():
             "message": "Signal Reprocessing Engine module not available"
         }
     except Exception as e:
-        _logger.error(f"Error getting reprocessing health: {e}")
+        _logger.error(f"Error getting reprocessing health: {e}", exc_info=True)
         return {
             "status": "ERROR",
             "message": f"Error retrieving health status: {str(e)}"
