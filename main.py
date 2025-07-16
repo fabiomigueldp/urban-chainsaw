@@ -56,6 +56,7 @@ from finviz import load_finviz_config, persist_finviz_config_from_dict # Keep co
 from comm_engine import comm_engine  # Import centralized communication engine
 from finviz_engine import FinvizEngine, FinvizConfig # Import the new engine
 from webhook_rate_limiter import WebhookRateLimiter # Import webhook rate limiter
+from admin_logger import log_admin_action  # Import admin action logging
 
 # Database integration
 from database.DBManager import db_manager
@@ -892,7 +893,7 @@ async def get_sell_all_list_data() -> Dict[str, Any]:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    """Initializes FinvizEngine, cache, and background tasks."""
+    """Initializes database, FinvizEngine, cache, and background tasks."""
     _logger.info("Application startup sequence initiated.")
 
     # Initialize database connection first
@@ -901,28 +902,25 @@ async def _startup() -> None:
     
     # Create database tables if they don't exist
     try:
-        from database.simple_init import init_database
+        from database.simple_init import init_database, ensure_default_finviz_url
         await init_database(settings.DATABASE_URL)
         _logger.info("✅ Database tables initialized successfully")
+        
+        # Ensure default Finviz strategy exists
+        await ensure_default_finviz_url(db_manager)
+        _logger.info("✅ Default Finviz strategy ensured")
+        
     except Exception as e:
         _logger.error(f"❌ Failed to initialize database: {e}")
         # Don't fail startup - the application can still work with memory-only mode
-    # Initialize database and ensure default strategy exists
-    try:
-        from database.db_init import initialize_database
-        await initialize_database()
-        _logger.info("✅ Database initialization completed")
-    except Exception as e:
-        _logger.error(f"❌ Database initialization failed: {e}")
-        # Don't continue without database for new strategy system
-        raise
+        _logger.warning("Continuing without database - using memory-only mode")
 
     # Initialize signal metrics start time
     shared_state["signal_metrics"]["metrics_start_time"] = time.time()
 
     # Initialize and start FinvizEngine with database manager
     if shared_state.get("finviz_engine_instance") is None:
-        # Pass db_manager to FinvizEngine for strategy management
+        # Pass database manager to FinvizEngine
         engine = FinvizEngine(shared_state, comm_engine.broadcast, db_manager)
         shared_state["finviz_engine_instance"] = engine
         asyncio.create_task(engine.run())
@@ -1182,12 +1180,14 @@ async def receive_signal(signal: Signal, _bg: BackgroundTasks):
 
 # Removed old /finviz/url endpoint, replaced by /finviz/config
 @app.post("/finviz/config", status_code=status.HTTP_204_NO_CONTENT)
-async def update_finviz_engine_config(payload: dict = Body(...)):
+@log_admin_action("config_update", "update_finviz_config")
+async def update_finviz_engine_config(request: Request, payload: dict = Body(...)):
     """
     Updates the FinvizEngine configuration (URL, TOP_N, Refresh Interval).
     All fields in payload are optional.
     Expects a JSON: {"url": "<new_url>", "top_n": <int>, "refresh": <int_seconds>, "token": "<token>"}
     """
+    
     token = payload.pop("token", None) # Remove token before passing to engine
     if token != FINVIZ_UPDATE_TOKEN:
         _logger.warning("Invalid token received for /finviz/config.")
@@ -1222,6 +1222,7 @@ async def update_finviz_engine_config(payload: dict = Body(...)):
 
     try:
         await engine.update_config(update_data)
+        
         _logger.info(f"FinvizEngine configuration update request processed: {update_data}")
         # No body for 204 response
     except ValueError as e: # Catch validation errors from engine (e.g. rate limit, bad values)
@@ -1233,7 +1234,8 @@ async def update_finviz_engine_config(payload: dict = Body(...)):
 
 
 @app.post("/admin/webhook/update", status_code=status.HTTP_204_NO_CONTENT)
-async def update_dest_webhook(payload: dict = Body(...)):
+@log_admin_action("config_update", "update_dest_webhook")
+async def update_dest_webhook(request: Request, payload: dict = Body(...)):
     """
     Updates the destination webhook URL.
     Expects a JSON: {"webhook_url": "<new_url>", "token": "<token>"}
@@ -1262,11 +1264,13 @@ async def update_dest_webhook(payload: dict = Body(...)):
 
 
 @app.post("/admin/metrics/reset", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_signal_metrics(payload: dict = Body(...)):
+@log_admin_action("metrics_reset", "reset_signal_metrics")
+async def reset_signal_metrics(request: Request, payload: dict = Body(...)):
     """
     Resets signal processing metrics counters.
     Expects a JSON: {"token": "<token>"}
     """
+    
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
         _logger.warning("Invalid token received for /admin/metrics/reset.")
@@ -1311,11 +1315,13 @@ async def reset_signal_metrics(payload: dict = Body(...)):
 
 
 @app.post("/admin/engine/pause", status_code=status.HTTP_204_NO_CONTENT)
-async def pause_finviz_engine(payload: dict = Body(...)):
+@log_admin_action("engine_control", "pause_engine")
+async def pause_finviz_engine(request: Request, payload: dict = Body(...)):
     """
     Pause the FinvizEngine refresh cycles.
     Expects a JSON: {"token": "<token>"}
     """
+    
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
         _logger.warning("Invalid token received for /admin/engine/pause.")
@@ -1328,6 +1334,7 @@ async def pause_finviz_engine(payload: dict = Body(...)):
 
     try:
         await engine.pause()
+        
         _logger.info("FinvizEngine paused via admin endpoint.")
         
         # Broadcast updated system status to all admin clients
@@ -1343,11 +1350,13 @@ async def pause_finviz_engine(payload: dict = Body(...)):
 
 
 @app.post("/admin/engine/resume", status_code=status.HTTP_204_NO_CONTENT)
-async def resume_finviz_engine(payload: dict = Body(...)):
+@log_admin_action("engine_control", "resume_engine")
+async def resume_finviz_engine(request: Request, payload: dict = Body(...)):
     """
     Resume the FinvizEngine refresh cycles.
     Expects a JSON: {"token": "<token>"}
     """
+    
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
         _logger.warning("Invalid token received for /admin/engine/resume.")
@@ -1360,6 +1369,7 @@ async def resume_finviz_engine(payload: dict = Body(...)):
 
     try:
         await engine.resume()
+        
         _logger.info("FinvizEngine resumed via admin endpoint.")
         
         # Broadcast updated system status to all admin clients
@@ -1375,7 +1385,8 @@ async def resume_finviz_engine(payload: dict = Body(...)):
 
 
 @app.post("/admin/engine/manual-refresh", status_code=status.HTTP_204_NO_CONTENT)
-async def trigger_manual_refresh(payload: dict = Body(...)):
+@log_admin_action("engine_control", "trigger_manual_refresh")
+async def trigger_manual_refresh(request: Request, payload: dict = Body(...)):
     """
     Trigger a manual refresh of the FinvizEngine.
     Expects a JSON: {"token": "<token>"}
@@ -1566,7 +1577,8 @@ async def get_system_info():
 
 
 @app.post("/admin/order/sell-individual", status_code=status.HTTP_200_OK)
-async def sell_individual_order(payload: SellIndividualPayload):
+@log_admin_action("order_management", "sell_individual_order")
+async def sell_individual_order(request: Request, payload: SellIndividualPayload):
     # Token validation
     if payload.token != FINVIZ_UPDATE_TOKEN:
         _logger.warning("Invalid token received for /admin/order/sell-individual.")
@@ -1615,7 +1627,8 @@ async def sell_individual_order(payload: SellIndividualPayload):
         raise HTTPException(status_code=500, detail=f"Error queueing sell signal: {str(e)}")
 
 @app.post("/admin/order/sell-all", status_code=status.HTTP_200_OK)
-async def sell_all_orders(payload: TokenPayload):
+@log_admin_action("order_management", "sell_all_orders")
+async def sell_all_orders(request: Request, payload: TokenPayload):
     """Creates and queues sell signals for all currently open positions from the database."""
     if payload.token != FINVIZ_UPDATE_TOKEN:
         _logger.warning("Invalid token received for /admin/order/sell-all.")
@@ -1866,7 +1879,8 @@ async def get_admin_audit_trail(
 # ---------------------------------------------------------------------------- #
 
 @app.post("/admin/webhook-rate-limiter/update", status_code=status.HTTP_204_NO_CONTENT)
-async def update_webhook_rate_limiter_config(payload: dict = Body(...)):
+@log_admin_action("rate_limiter_control", "update_webhook_rate_limiter_config")
+async def update_webhook_rate_limiter_config(request: Request, payload: dict = Body(...)):
     """Update webhook rate limiter configuration."""
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
@@ -1891,7 +1905,8 @@ async def update_webhook_rate_limiter_config(payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating config")
 
 @app.post("/admin/webhook-rate-limiter/pause", status_code=status.HTTP_204_NO_CONTENT)
-async def pause_webhook_rate_limiter(payload: dict = Body(...)):
+@log_admin_action("rate_limiter_control", "pause_webhook_rate_limiter")
+async def pause_webhook_rate_limiter(request: Request, payload: dict = Body(...)):
     """Pause webhook rate limiter."""
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
@@ -1917,7 +1932,8 @@ async def pause_webhook_rate_limiter(payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error pausing rate limiter")
 
 @app.post("/admin/webhook-rate-limiter/resume", status_code=status.HTTP_204_NO_CONTENT)
-async def resume_webhook_rate_limiter(payload: dict = Body(...)):
+@log_admin_action("rate_limiter_control", "resume_webhook_rate_limiter")
+async def resume_webhook_rate_limiter(request: Request, payload: dict = Body(...)):
     """Resume webhook rate limiter."""
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
@@ -2276,7 +2292,8 @@ async def close_order_manually(position_id: int, payload: dict = Body(...)):
 
 
 @app.post("/admin/clear-database")
-async def clear_database(payload: dict = Body(...)):
+@log_admin_action("database_operation", "clear_database")
+async def clear_database(request: Request, payload: dict = Body(...)):
     """Limpa completamente todos os dados do banco de dados. OPERAÇÃO DESTRUTIVA!"""
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
@@ -2354,7 +2371,8 @@ async def export_database_csv():
 
 
 @app.post("/admin/import-csv")
-async def import_database_csv(payload: dict = Body(...)):
+@log_admin_action("file_import", "import_database_csv")
+async def import_database_csv(request: Request, payload: dict = Body(...)):
     """Importa dados de CSV para o banco de dados."""
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
@@ -2523,182 +2541,191 @@ async def trigger_manual_reprocessing(payload: dict = Body(...)):
                            detail="Signal Reprocessing Engine not available")
     except Exception as e:
         _logger.error(f"Error in manual reprocessing: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                           detail=f"Reprocessing failed: {str(e)}")
 
 # ==========================================================================================
-#                           FINVIZ STRATEGIES MANAGEMENT ENDPOINTS
+#                           FINVIZ STRATEGY MANAGEMENT ENDPOINTS
 # ==========================================================================================
 
-from admin_logger import log_admin_action, AdminActionTypes
+def authenticate_admin_token(token: str) -> bool:
+    """Authenticate admin token against the configured token."""
+    return token == FINVIZ_UPDATE_TOKEN
 
 @app.get("/admin/finviz/strategies")
 async def get_finviz_strategies():
-    """Lists all registered Finviz strategies with complete configuration."""
+    """Lists all Finviz strategies with complete configurations."""
     try:
         strategies = await db_manager.get_finviz_urls()
-        return {
-            "success": True,
-            "strategies": strategies,
-            "count": len(strategies)
-        }
+        return {"strategies": strategies, "count": len(strategies)}
     except Exception as e:
-        _logger.error(f"Error retrieving Finviz strategies: {e}")
+        _logger.error(f"Error getting Finviz strategies: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.post("/admin/finviz/strategies")
-@log_admin_action(AdminActionTypes.URL_MANAGEMENT, "create_strategy")
+@log_admin_action("url_management", "create_finviz_strategy")
 async def create_finviz_strategy(request: Request, payload: dict = Body(...)):
-    """Creates a new complete Finviz strategy with all configuration parameters."""
-    token = payload.get("token")
-    if token != FINVIZ_UPDATE_TOKEN:
-        _logger.warning("Invalid token received for strategy creation.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    """Creates a new complete Finviz strategy."""
     
-    required_fields = ["name", "url"]
-    for field in required_fields:
-        if field not in payload or not payload[field]:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Field '{field}' is required")
+    if not authenticate_admin_token(payload.get("token")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
     
     try:
+        # Extract strategy data
+        name = payload.get("name")
+        url = payload.get("url")
+        description = payload.get("description", "")
+        top_n = payload.get("top_n", 100)
+        refresh_interval_sec = payload.get("refresh_interval_sec", 10)
+        reprocess_enabled = payload.get("reprocess_enabled", False)
+        reprocess_window_seconds = payload.get("reprocess_window_seconds", 300)
+        respect_sell_chronology_enabled = payload.get("respect_sell_chronology_enabled", True)
+        sell_chronology_window_seconds = payload.get("sell_chronology_window_seconds", 300)
+        
+        if not name or not url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name and URL are required")
+        
+        # Create strategy
         strategy_id = await db_manager.create_finviz_url(
-            name=payload["name"],
-            url=payload["url"],
-            description=payload.get("description"),
-            top_n=payload.get("top_n", 100),
-            refresh_interval_sec=payload.get("refresh_interval_sec", 10),
-            reprocess_enabled=payload.get("reprocess_enabled", False),
-            reprocess_window_seconds=payload.get("reprocess_window_seconds", 300),
-            respect_sell_chronology_enabled=payload.get("respect_sell_chronology_enabled", True),
-            sell_chronology_window_seconds=payload.get("sell_chronology_window_seconds", 300),
-            is_active=payload.get("is_active", False)
+            name=name,
+            url=url,
+            description=description,
+            top_n=top_n,
+            refresh_interval_sec=refresh_interval_sec,
+            reprocess_enabled=reprocess_enabled,
+            reprocess_window_seconds=reprocess_window_seconds,
+            respect_sell_chronology_enabled=respect_sell_chronology_enabled,
+            sell_chronology_window_seconds=sell_chronology_window_seconds
         )
         
-        return {
-            "success": True,
-            "strategy_id": strategy_id,
-            "message": f"Strategy '{payload['name']}' created successfully"
-        }
+        return {"strategy_id": strategy_id, "message": "Strategy created successfully"}
         
     except Exception as e:
         _logger.error(f"Error creating Finviz strategy: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.put("/admin/finviz/strategies/{strategy_id}")
-@log_admin_action(AdminActionTypes.URL_MANAGEMENT, "update_strategy", target_resource="{strategy_id}")
+@log_admin_action("url_management", "update_finviz_strategy", target_resource="strategy_{strategy_id}")
 async def update_finviz_strategy(strategy_id: int, request: Request, payload: dict = Body(...)):
-    """Updates an existing Finviz strategy (any field)."""
-    token = payload.get("token")
-    if token != FINVIZ_UPDATE_TOKEN:
-        _logger.warning("Invalid token received for strategy update.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    """Updates an existing Finviz strategy."""
     
-    # Extract update fields (exclude token)
-    update_fields = {k: v for k, v in payload.items() if k != "token"}
-    
-    if not update_fields:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+    if not authenticate_admin_token(payload.get("token")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
     
     try:
-        success = await db_manager.update_finviz_url(strategy_id, **update_fields)
+        # Extract update data
+        update_data = {}
+        allowed_fields = [
+            "name", "url", "description", "top_n", "refresh_interval_sec",
+            "reprocess_enabled", "reprocess_window_seconds", 
+            "respect_sell_chronology_enabled", "sell_chronology_window_seconds"
+        ]
+        
+        for field in allowed_fields:
+            if field in payload:
+                update_data[field] = payload[field]
+        
+        if not update_data:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields to update")
+        
+        # Update strategy
+        success = await db_manager.update_finviz_url(strategy_id, **update_data)
+        
         if not success:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
         
-        return {
-            "success": True,
-            "message": f"Strategy {strategy_id} updated successfully"
-        }
+        return {"message": "Strategy updated successfully"}
         
+    except HTTPException:
+        raise
     except Exception as e:
-        _logger.error(f"Error updating Finviz strategy {strategy_id}: {e}")
+        _logger.error(f"Error updating Finviz strategy: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.delete("/admin/finviz/strategies/{strategy_id}")
-@log_admin_action(AdminActionTypes.URL_MANAGEMENT, "delete_strategy", target_resource="{strategy_id}")
+@log_admin_action("url_management", "delete_finviz_strategy", target_resource="strategy_{strategy_id}")
 async def delete_finviz_strategy(strategy_id: int, request: Request, payload: dict = Body(...)):
-    """Deletes a Finviz strategy (cannot delete active strategy)."""
-    token = payload.get("token")
-    if token != FINVIZ_UPDATE_TOKEN:
-        _logger.warning("Invalid token received for strategy deletion.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    """Removes a Finviz strategy (cannot be the active one)."""
+    
+    if not authenticate_admin_token(payload.get("token")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
     
     try:
+        # Delete strategy
         success = await db_manager.delete_finviz_url(strategy_id)
+        
         if not success:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete strategy (may be active or not found)")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
+                              detail="Cannot delete strategy (not found or is active)")
         
-        return {
-            "success": True,
-            "message": f"Strategy {strategy_id} deleted successfully"
-        }
+        return {"message": "Strategy deleted successfully"}
         
+    except HTTPException:
+        raise
     except Exception as e:
-        _logger.error(f"Error deleting Finviz strategy {strategy_id}: {e}")
+        _logger.error(f"Error deleting Finviz strategy: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.post("/admin/finviz/strategies/{strategy_id}/activate")
-@log_admin_action(AdminActionTypes.URL_MANAGEMENT, "activate_strategy", target_resource="{strategy_id}")
+@log_admin_action("url_management", "activate_finviz_strategy", target_resource="strategy_{strategy_id}")
 async def activate_finviz_strategy(strategy_id: int, request: Request, payload: dict = Body(...)):
-    """Activates a specific Finviz strategy (real-time switch)."""
-    token = payload.get("token")
-    if token != FINVIZ_UPDATE_TOKEN:
-        _logger.warning("Invalid token received for strategy activation.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    """Activates a specific strategy (switches in real-time)."""
+    
+    if not authenticate_admin_token(payload.get("token")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
     
     try:
-        # Get the engine instance
+        # Get engine instance
         engine = shared_state.get("finviz_engine_instance")
         if not engine:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="FinvizEngine not available")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                              detail="FinvizEngine not available")
         
         # Switch active strategy
         success = await engine.switch_active_url(strategy_id)
+        
         if not success:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
+                              detail="Failed to activate strategy")
         
-        # Get updated active strategy info
-        active_strategy = await db_manager.get_active_finviz_url()
+        return {"message": "Strategy activated successfully"}
         
-        return {
-            "success": True,
-            "active_strategy": active_strategy,
-            "message": f"Strategy {strategy_id} activated successfully"
-        }
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        _logger.error(f"Error activating Finviz strategy {strategy_id}: {e}")
+        _logger.error(f"Error activating Finviz strategy: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.get("/admin/finviz/strategies/active")
 async def get_active_finviz_strategy():
-    """Returns the currently active Finviz strategy with all configuration."""
+    """Returns the currently active strategy with all configurations."""
     try:
         active_strategy = await db_manager.get_active_finviz_url()
         if not active_strategy:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active strategy found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
+                              detail="No active strategy found")
         
-        return {
-            "success": True,
-            "active_strategy": active_strategy
-        }
+        return {"active_strategy": active_strategy}
         
+    except HTTPException:
+        raise
     except Exception as e:
-        _logger.error(f"Error retrieving active Finviz strategy: {e}")
+        _logger.error(f"Error getting active Finviz strategy: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.post("/admin/finviz/strategies/{strategy_id}/duplicate")
-@log_admin_action(AdminActionTypes.URL_MANAGEMENT, "duplicate_strategy", target_resource="{strategy_id}")
+@log_admin_action("url_management", "duplicate_finviz_strategy", target_resource="strategy_{strategy_id}")
 async def duplicate_finviz_strategy(strategy_id: int, request: Request, payload: dict = Body(...)):
-    """Duplicates an existing Finviz strategy with a new name."""
-    token = payload.get("token")
-    if token != FINVIZ_UPDATE_TOKEN:
-        _logger.warning("Invalid token received for strategy duplication.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+    """Duplicates an existing strategy with a new name."""
     
-    new_name = payload.get("new_name")
-    if not new_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="new_name is required")
+    if not authenticate_admin_token(payload.get("token")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
     
     try:
+        new_name = payload.get("new_name")
+        if not new_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New name is required")
+        
         # Get source strategy
         strategies = await db_manager.get_finviz_urls()
         source_strategy = next((s for s in strategies if s["id"] == strategy_id), None)
@@ -2716,18 +2743,15 @@ async def duplicate_finviz_strategy(strategy_id: int, request: Request, payload:
             reprocess_enabled=source_strategy["reprocess_enabled"],
             reprocess_window_seconds=source_strategy["reprocess_window_seconds"],
             respect_sell_chronology_enabled=source_strategy["respect_sell_chronology_enabled"],
-            sell_chronology_window_seconds=source_strategy["sell_chronology_window_seconds"],
-            is_active=False  # Never duplicate as active
+            sell_chronology_window_seconds=source_strategy["sell_chronology_window_seconds"]
         )
         
-        return {
-            "success": True,
-            "new_strategy_id": new_strategy_id,
-            "message": f"Strategy duplicated successfully as '{new_name}'"
-        }
+        return {"strategy_id": new_strategy_id, "message": "Strategy duplicated successfully"}
         
+    except HTTPException:
+        raise
     except Exception as e:
-        _logger.error(f"Error duplicating Finviz strategy {strategy_id}: {e}")
+        _logger.error(f"Error duplicating Finviz strategy: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # ==========================================================================================
@@ -2742,4 +2766,98 @@ async def get_admin_actions_log(
     hours: Optional[int] = None,
     success_filter: Optional[bool] = None
 ):
-    """Returns admin actions log with filters and pagination."""
+    """Returns administrative actions log with filters."""
+    try:
+        actions = await db_manager.get_admin_actions_log(
+            limit=limit,
+            offset=offset,
+            action_type_filter=action_type_filter,
+            hours=hours,
+            success_filter=success_filter
+        )
+        
+        total_count = await db_manager.get_admin_actions_count(
+            action_type_filter=action_type_filter,
+            hours=hours,
+            success_filter=success_filter
+        )
+        
+        return {
+            "actions": actions,
+            "total": total_count,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        _logger.error(f"Error getting admin actions log: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/admin/actions-log/summary")
+async def get_admin_actions_summary(hours: int = 24):
+    """Returns summary statistics for administrative actions."""
+    try:
+        summary = await db_manager.get_admin_actions_summary(hours=hours)
+        return summary
+        
+    except Exception as e:
+        _logger.error(f"Error getting admin actions summary: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/admin/actions-log/export")
+async def export_admin_actions_log(
+    hours: Optional[int] = None,
+    action_type_filter: Optional[str] = None,
+    format: str = 'csv'
+):
+    """Exports administrative actions log."""
+    try:
+        actions = await db_manager.get_admin_actions_log(
+            limit=10000,  # Large limit for export
+            offset=0,
+            action_type_filter=action_type_filter,
+            hours=hours
+        )
+        
+        if format.lower() == 'csv':
+            # Create CSV response
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Write header
+            writer.writerow([
+                'Action ID', 'Timestamp', 'Action Type', 'Action Name', 
+                'Admin Token', 'IP Address', 'Success', 'Error Message',
+                'Target Resource', 'Execution Time (ms)'
+            ])
+            
+            # Write data
+            for action in actions:
+                writer.writerow([
+                    action['action_id'],
+                    action['timestamp'],
+                    action['action_type'],
+                    action['action_name'],
+                    action['admin_token'],
+                    action['ip_address'],
+                    action['success'],
+                    action['error_message'],
+                    action['target_resource'],
+                    action['execution_time_ms']
+                ])
+            
+            csv_content = output.getvalue()
+            output.close()
+            
+            return Response(
+                content=csv_content,
+                media_type='text/csv',
+                headers={'Content-Disposition': f'attachment; filename=admin_actions_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'}
+            )
+        else:
+            # JSON format
+            return JSONResponse(content={"actions": actions})
+            
+    except Exception as e:
+        _logger.error(f"Error exporting admin actions: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

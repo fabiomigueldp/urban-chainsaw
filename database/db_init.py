@@ -1,82 +1,102 @@
-"""
-Database initialization utility for Trading Signal Processor.
-Ensures default Finviz strategy exists and database is properly set up.
-"""
+"""Database initialization and migration logic."""
 
-import asyncio
 import logging
-from database.DBManager import db_manager
-from config import settings
+from pathlib import Path
+from sqlalchemy.ext.asyncio import create_async_engine
+from database.simple_models import Base
+from database.simple_init import init_database, ensure_default_finviz_url, check_database_health
 
 _logger = logging.getLogger("db_init")
 
-async def ensure_default_finviz_url():
-    """Ensures that there's always at least one active Finviz strategy in the system."""
+async def run_migration_script(database_url: str, script_path: str):
+    """Run a specific SQL migration script."""
+    engine = create_async_engine(database_url, echo=False)
+    
     try:
-        # Check if any URLs exist in database
-        urls_count = await db_manager.count_finviz_urls()
+        script_file = Path(script_path)
+        if not script_file.exists():
+            _logger.warning(f"Migration script not found: {script_path}")
+            return
+            
+        with open(script_file, 'r', encoding='utf-8') as f:
+            sql_content = f.read()
+            
+        if not sql_content.strip():
+            _logger.info(f"Migration script is empty: {script_path}")
+            return
+            
+        _logger.info(f"Running migration script: {script_path}")
         
-        if urls_count == 0:
-            # Create default strategy with complete configuration
-            default_strategy = {
-                "name": "Default Strategy",
-                "url": "https://finviz.com/screener.ashx?v=111&ft=4",
-                "description": "Default system strategy with basic configuration for new setups",
-                "top_n": 100,
-                "refresh_interval_sec": 10,
-                "reprocess_enabled": False,
-                "reprocess_window_seconds": 300,
-                "respect_sell_chronology_enabled": True,
-                "sell_chronology_window_seconds": 300,
-                "is_active": True
-            }
-            await db_manager.create_finviz_url(**default_strategy)
-            _logger.info("✅ Created default Finviz strategy preset")
-        else:
-            # Ensure at least one URL is active
-            active_url = await db_manager.get_active_finviz_url()
-            if not active_url:
-                # If none is active, activate the first one
-                first_url = await db_manager.get_first_finviz_url()
-                if first_url:
-                    await db_manager.set_active_finviz_url(first_url['id'])
-                    _logger.info(f"✅ Activated first strategy: {first_url['name']}")
+        async with engine.begin() as conn:
+            # Split SQL by statements and execute each one
+            statements = [stmt.strip() for stmt in sql_content.split(';') if stmt.strip()]
+            
+            for stmt in statements:
+                if stmt.upper().startswith(('CREATE', 'INSERT', 'UPDATE', 'ALTER', 'DROP', 'COMMENT', 'DO')):
+                    await conn.exec_driver_sql(stmt)
                     
+        _logger.info(f"✅ Migration script completed: {script_path}")
+        
     except Exception as e:
-        _logger.error(f"❌ Error ensuring default Finviz URL: {e}")
+        _logger.error(f"❌ Error running migration script {script_path}: {e}")
         raise
+    finally:
+        await engine.dispose()
 
-async def initialize_database():
-    """Complete database initialization."""
+async def initialize_database_with_migrations(database_url: str, db_manager=None):
+    """Complete database initialization including migrations."""
     try:
-        # Initialize DBManager
-        db_manager.initialize(settings.DATABASE_URL)
-        _logger.info("🔗 Database connection initialized")
+        # First, create basic tables using SQLAlchemy models
+        await init_database(database_url)
         
-        # Ensure default Finviz strategy exists
-        await ensure_default_finviz_url()
+        # Run migration scripts for additional tables
+        migration_script = Path(__file__).parent / "migration_finviz_urls_admin_actions.sql"
+        await run_migration_script(database_url, str(migration_script))
         
-        _logger.info("🎯 Database initialization completed successfully")
+        # Ensure default data if db_manager is provided
+        if db_manager:
+            await ensure_default_finviz_url(db_manager)
+            
+        _logger.info("✅ Complete database initialization finished successfully")
         
     except Exception as e:
         _logger.error(f"❌ Database initialization failed: {e}")
         raise
 
-async def get_current_finviz_strategy():
-    """Gets the currently active Finviz strategy for engine initialization."""
+async def check_and_repair_database(database_url: str):
+    """Check database health and repair if needed."""
     try:
-        active_strategy = await db_manager.get_active_finviz_url()
-        if not active_strategy:
-            raise RuntimeError("No active Finviz strategy found - database may not be initialized")
-        
-        _logger.info(f"📊 Active strategy: {active_strategy['name']} - {active_strategy['url'][:50]}...")
-        return active_strategy
-        
+        # Basic health check
+        if not await check_database_health(database_url):
+            raise Exception("Database connection failed")
+            
+        # Check if required tables exist
+        engine = create_async_engine(database_url, echo=False)
+        async with engine.begin() as conn:
+            # Check for key tables
+            result = await conn.exec_driver_sql("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name IN ('signals', 'finviz_urls', 'admin_actions')
+            """)
+            
+            existing_tables = [row[0] for row in result.fetchall()]
+            required_tables = ['signals', 'finviz_urls', 'admin_actions']
+            missing_tables = [t for t in required_tables if t not in existing_tables]
+            
+            if missing_tables:
+                _logger.warning(f"Missing tables detected: {missing_tables}")
+                await engine.dispose()
+                
+                # Re-run initialization
+                await initialize_database_with_migrations(database_url)
+                return True
+            else:
+                _logger.info("✅ All required database tables present")
+                await engine.dispose()
+                return True
+                
     except Exception as e:
-        _logger.error(f"❌ Error retrieving active Finviz strategy: {e}")
-        raise
-
-if __name__ == "__main__":
-    # Can be run standalone for database setup
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(initialize_database())
+        _logger.error(f"❌ Database check and repair failed: {e}")
+        return False

@@ -316,41 +316,34 @@ class FinvizEngine:
                 raise RuntimeError("No active Finviz strategy configuration available") from e
 
     async def update_config(self, new_config_data: Dict[str, Any]) -> None:
+        """Updates the active Finviz strategy configuration in database - DATABASE ONLY"""
         async with self._config_lock:
-            if self._current_config is None: # Should have been loaded by get_config or run
+            if self._current_config is None:
                 await self._load_config_from_db()
 
-            # Create a proposed new configuration, merging with current
+            # Get active strategy from database
+            active_strategy = await self.db_manager.get_active_finviz_url()
+            if not active_strategy:
+                raise RuntimeError("No active Finviz strategy found in database")
+
+            # Create proposed configuration merging with current
             proposed_data = self._current_config.dict()
+            
+            # Update fields from new_config_data
             if "url" in new_config_data and new_config_data["url"] is not None:
                 proposed_data["url"] = new_config_data["url"]
             if "top_n" in new_config_data and new_config_data["top_n"] is not None:
                 proposed_data["top_n"] = new_config_data["top_n"]
             if "refresh" in new_config_data and new_config_data["refresh"] is not None:
                 proposed_data["refresh"] = new_config_data["refresh"]
-
-            # Handle new reprocessing fields
             if "reprocess_enabled" in new_config_data and new_config_data["reprocess_enabled"] is not None:
                 proposed_data["reprocess_enabled"] = new_config_data["reprocess_enabled"]
-            elif "reprocess_enabled" not in proposed_data: # Ensure default if not present
-                proposed_data["reprocess_enabled"] = self._current_config.reprocess_enabled if self._current_config else False
-
             if "reprocess_window_seconds" in new_config_data and new_config_data["reprocess_window_seconds"] is not None:
                 proposed_data["reprocess_window_seconds"] = new_config_data["reprocess_window_seconds"]
-            elif "reprocess_window_seconds" not in proposed_data: # Ensure default if not present
-                proposed_data["reprocess_window_seconds"] = self._current_config.reprocess_window_seconds if self._current_config else 300
-
-            # Handle new sell chronology fields
             if "respect_sell_chronology_enabled" in new_config_data and new_config_data["respect_sell_chronology_enabled"] is not None:
                 proposed_data["respect_sell_chronology_enabled"] = new_config_data["respect_sell_chronology_enabled"]
-            elif "respect_sell_chronology_enabled" not in proposed_data: # Ensure default if not present
-                proposed_data["respect_sell_chronology_enabled"] = self._current_config.respect_sell_chronology_enabled if self._current_config else True
-
             if "sell_chronology_window_seconds" in new_config_data and new_config_data["sell_chronology_window_seconds"] is not None:
                 proposed_data["sell_chronology_window_seconds"] = new_config_data["sell_chronology_window_seconds"]
-            elif "sell_chronology_window_seconds" not in proposed_data: # Ensure default if not present
-                proposed_data["reprocess_window_seconds"] = self._current_config.reprocess_window_seconds if self._current_config else 300
-
 
             try:
                 new_cfg = FinvizConfig(**proposed_data)
@@ -358,8 +351,7 @@ class FinvizEngine:
                 _logger.error(f"Invalid config data provided for update: {e}")
                 raise ValueError(f"Invalid config data: {e}")
 
-            # Validate rate limits before applying - check current authentication state
-            # Use current authentication status to determine actual rate limits
+            # Validate rate limits before applying
             is_currently_authenticated = (
                 bool(self._auth_cookies) and 
                 self._session_valid_until > 0 and 
@@ -367,17 +359,15 @@ class FinvizEngine:
             )
             
             if is_currently_authenticated and settings.FINVIZ_USE_ELITE:
-                # Currently authenticated Elite user
                 tickers_per_page = 100
                 max_req_per_min = 120
             else:
-                # Free account or not authenticated
                 tickers_per_page = 20
                 max_req_per_min = 59
                 
             pages_required = math.ceil(new_cfg.top_n / tickers_per_page)
             requests_per_cycle = pages_required
-            # Ensure refresh is not zero to avoid division by zero
+            
             if new_cfg.refresh <= 0:
                 _logger.error("Refresh interval must be positive.")
                 raise ValueError("Refresh interval must be positive.")
@@ -396,17 +386,48 @@ class FinvizEngine:
                     f"Calculated: {expected_reqs_per_min:.2f}, Max: {max_req_per_min} ({auth_status} account)"
                 )
 
-            # Persist to file
-            persist_finviz_config_from_dict({
-                "finviz_url": str(new_cfg.url), # Pydantic HttpUrl to string
+            # Update active strategy in database
+            update_data = {
+                "url": str(new_cfg.url),
                 "top_n": new_cfg.top_n,
                 "refresh_interval_sec": new_cfg.refresh,
                 "reprocess_enabled": new_cfg.reprocess_enabled,
-                "reprocess_window_seconds": new_cfg.reprocess_window_seconds
-            })
+                "reprocess_window_seconds": new_cfg.reprocess_window_seconds,
+                "respect_sell_chronology_enabled": new_cfg.respect_sell_chronology_enabled,
+                "sell_chronology_window_seconds": new_cfg.sell_chronology_window_seconds
+            }
+            
+            success = await self.db_manager.update_finviz_url(active_strategy["id"], **update_data)
+            if not success:
+                raise RuntimeError("Failed to update Finviz strategy in database")
+            
             self._current_config = new_cfg
-            _logger.info(f"FinvizEngine config updated and persisted: {self._current_config}")
+            _logger.info(f"FinvizEngine config updated in database: {self._current_config}")
             self.cfg_updated_event.set()
+
+    async def switch_active_url(self, url_id: int) -> bool:
+        """Switches the active strategy in real-time - ATOMIC OPERATION"""
+        try:
+            # Atomic operation in database
+            success = await self.db_manager.set_active_finviz_url(url_id)
+            if success:
+                # Reload configuration from database
+                await self._load_config_from_db()
+                # Force engine update
+                self.cfg_updated_event.set()
+                
+                # Broadcast to interface
+                active_strategy = await self.db_manager.get_active_finviz_url()
+                await self.admin_ws_broadcaster("finviz_strategy_changed", {
+                    "active_strategy": active_strategy
+                })
+                
+                _logger.info(f"Successfully switched to strategy ID {url_id}")
+                return True
+        except Exception as e:
+            _logger.error(f"Error switching active strategy: {e}")
+            
+        return False
 
 
     async def run(self):

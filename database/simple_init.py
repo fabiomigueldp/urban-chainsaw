@@ -18,8 +18,9 @@ async def init_database(database_url: str):
             _logger.info("✅ Database tables created successfully (preserving existing data)")
             
             # Create unique constraint for active Finviz URLs
-            await conn.execute("""
-                CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_finviz_urls_active 
+            # Note: CONCURRENTLY cannot be used in a transaction, so using regular CREATE INDEX
+            await conn.exec_driver_sql("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_finviz_urls_active 
                 ON finviz_urls (is_active) 
                 WHERE is_active = TRUE
             """)
