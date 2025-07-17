@@ -534,27 +534,37 @@ async def get_system_info_data() -> Dict[str, Any]:
             except Exception as e:
                 _logger.error(f"Error getting webhook rate limiter metrics: {e}")
         
-        # Get reprocess status from finviz config
+        # Get reprocess status from active strategy in database (not JSON file)
         try:
-            finviz_config = load_finviz_config()
-            reprocess_enabled = finviz_config.get("reprocess_enabled", False)
-            reprocess_window = finviz_config.get("reprocess_window_seconds", 300)
-            
-            system_info["reprocess_enabled"] = reprocess_enabled
-            system_info["reprocess_window_seconds"] = reprocess_window # Add this line
-            
-            # Determine reprocess_mode for frontend
-            if not reprocess_enabled:
-                system_info["reprocess_mode"] = "Disabled"
-            elif reprocess_window == 0:
-                system_info["reprocess_mode"] = "Infinite"
+            if engine:
+                config = await engine.get_config()
+                system_info["reprocess_enabled"] = config.reprocess_enabled
+                system_info["reprocess_window_seconds"] = config.reprocess_window_seconds
+                system_info["respect_sell_chronology_enabled"] = config.respect_sell_chronology_enabled
+                system_info["sell_chronology_window_seconds"] = config.sell_chronology_window_seconds
+                
+                # Determine reprocess_mode for frontend
+                if not config.reprocess_enabled:
+                    system_info["reprocess_mode"] = "Disabled"
+                elif config.reprocess_window_seconds == 0:
+                    system_info["reprocess_mode"] = "Infinite"
+                else:
+                    system_info["reprocess_mode"] = f"{config.reprocess_window_seconds}s Window"
             else:
-                system_info["reprocess_mode"] = f"{reprocess_window}s Window"
+                # Fallback when engine not available
+                system_info["reprocess_enabled"] = False
+                system_info["reprocess_mode"] = "Engine Not Available"
+                system_info["reprocess_window_seconds"] = 300
+                system_info["respect_sell_chronology_enabled"] = True
+                system_info["sell_chronology_window_seconds"] = 300
 
         except Exception as e:
-            _logger.warning(f"Could not load finviz config for reprocess status: {e}")
+            _logger.warning(f"Could not get active strategy config for reprocess status: {e}")
             system_info["reprocess_enabled"] = False
             system_info["reprocess_mode"] = "Unknown"
+            system_info["reprocess_window_seconds"] = 300
+            system_info["respect_sell_chronology_enabled"] = True
+            system_info["sell_chronology_window_seconds"] = 300
         
         # Get sell all cleanup status from system config
         try:
@@ -1100,14 +1110,18 @@ async def update_finviz_engine_config(request: Request, payload: dict = Body(...
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="FinvizEngine not available.")
 
     # Validate payload structure and map frontend field names to engine field names
-    # Frontend sends: finviz_url, top_n, refresh_interval_sec, reprocess_enabled, reprocess_window_seconds
-    # Engine expects: url, top_n, refresh, reprocess_enabled, reprocess_window_seconds
+    # Frontend sends: finviz_url, top_n, refresh_interval_sec, reprocess_enabled, reprocess_window_seconds, 
+    #                 respect_sell_chronology_enabled, sell_chronology_window_seconds
+    # Engine expects: url, top_n, refresh, reprocess_enabled, reprocess_window_seconds,
+    #                 respect_sell_chronology_enabled, sell_chronology_window_seconds
     field_mapping = {
         "finviz_url": "url",
         "top_n": "top_n",
         "refresh_interval_sec": "refresh",
         "reprocess_enabled": "reprocess_enabled",
-        "reprocess_window_seconds": "reprocess_window_seconds"
+        "reprocess_window_seconds": "reprocess_window_seconds",
+        "respect_sell_chronology_enabled": "respect_sell_chronology_enabled",
+        "sell_chronology_window_seconds": "sell_chronology_window_seconds"
     }
     
     update_data = {}
@@ -1844,22 +1858,37 @@ async def get_webhook_config():
 
 @app.get("/admin/finviz/config")
 async def get_finviz_config():
-    """Get current Finviz configuration."""
+    """Get current Finviz configuration FROM ACTIVE STRATEGY IN DATABASE."""
     try:
-        # Load from finviz config file
-        finviz_config = load_finviz_config()
-        
-        return {
-            "finviz_url": finviz_config.get("finviz_url", ""),
-            "top_n": finviz_config.get("top_n", 15),
-            "refresh_interval_sec": finviz_config.get("refresh_interval_sec", 10),
-            "reprocess_enabled": finviz_config.get("reprocess_enabled", False),
-            "reprocess_window_seconds": finviz_config.get("reprocess_window_seconds", 300),
-            "timestamp": time.time()
-        }
+        # Load from active strategy in database (not JSON file)
+        engine = shared_state.get("finviz_engine_instance")
+        if engine:
+            config = await engine.get_config()
+            return {
+                "finviz_url": str(config.url),
+                "top_n": config.top_n,
+                "refresh_interval_sec": config.refresh,
+                "reprocess_enabled": config.reprocess_enabled,
+                "reprocess_window_seconds": config.reprocess_window_seconds,
+                "respect_sell_chronology_enabled": config.respect_sell_chronology_enabled,
+                "sell_chronology_window_seconds": config.sell_chronology_window_seconds,
+                "timestamp": time.time()
+            }
+        else:
+            # Fallback when engine not available - return safe defaults
+            return {
+                "finviz_url": "",
+                "top_n": 100,
+                "refresh_interval_sec": 10,
+                "reprocess_enabled": False,
+                "reprocess_window_seconds": 300,
+                "respect_sell_chronology_enabled": True,
+                "sell_chronology_window_seconds": 300,
+                "timestamp": time.time()
+            }
     except Exception as e:
-        _logger.error(f"Error getting finviz config: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving finviz config")
+        _logger.error(f"Error getting finviz config from active strategy: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving finviz config from active strategy")
 
 # --- Sell All List Management API Endpoints ---
 

@@ -535,52 +535,14 @@
                             </button>
                         </div>
                         <hr>
-                        <div id="reprocessingEngineContainer">
-                            <h5 class="card-title mt-4">
-                                <i class="bi bi-arrow-repeat"></i> Signal Reprocessing Engine
-                            </h5>
-                            <!-- 1. Main Status Indicator with Health -->
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h6 class="mb-0">Status:</h6>
-                                <div class="d-flex gap-2">
-                                    <span id="reprocessingEngineStatus" class="badge bg-secondary fs-6">DISABLED</span>
-                                    <span id="reprocessingHealthStatus" class="badge bg-info fs-6" style="display: none;">HEALTH: UNKNOWN</span>
+                        <!-- Signal Reprocessing Engine section REMOVED - now configured per Finviz Strategy -->
+                        <div class="alert alert-info border-0" style="background-color: #e3f2fd;">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-info-circle-fill me-2" style="color: #1976d2;"></i>
+                                <div>
+                                    <strong>Signal Reprocessing Configuration</strong><br>
+                                    <small>Reprocessing is now configured per strategy. Use <strong>Configuration Modal → Finviz Strategies</strong> to set reprocessing parameters for each strategy individually.</small>
                                 </div>
-                            </div>
-                            
-                            <!-- Health Details -->
-                            <div id="reprocessingHealthDetails" class="mb-3" style="display: none;">
-                                <small class="text-muted">
-                                    <div>Success Rate: <span id="reprocessingSuccessRate">-</span>%</div>
-                                    <div>Last Run: <span id="reprocessingLastRun">-</span></div>
-                                    <div>Signals Processed: <span id="reprocessingSignalsProcessed">-</span></div>
-                                </small>
-                            </div>
-
-                            <!-- 2. Controles Simplificados -->
-                            <div class="mb-3">
-                                <label for="reprocessingModeSelect" class="form-label">Operating Mode:</label>
-                                <select class="form-select" id="reprocessingModeSelect">
-                                    <option value="disabled">Disabled</option>
-                                    <option value="window">Time Window</option>
-                                    <option value="infinite">Infinite Recovery</option>
-                                </select>
-                            </div>
-
-                            <!-- 3. Time Window Field (conditionally visible) -->
-                            <div id="reprocessingWindowContainer" class="mb-3" style="display: none;">
-                                <label for="reprocessingWindowInput" class="form-label">Lookback Window (seconds):</label>
-                                <input type="number" class="form-control" id="reprocessingWindowInput" value="300" min="1">
-                                <small class="form-text text-muted">
-                                    How far back to look for rejected signals (e.g., 300s = 5 minutes).
-                                </small>
-                            </div>
-
-                            <!-- 4. Unified Action Button -->
-                            <div class="d-grid">
-                                <button id="applyReprocessingConfigBtn" class="btn btn-primary">
-                                    <i class="bi bi-check-circle"></i> Apply Configuration
-                                </button>
                             </div>
                         </div>
                     </div>
@@ -980,7 +942,7 @@
         let approvalChart = null;
         let auditCurrentPage = 1;
         let auditIsLoading = false;
-        let isInteractingWithReprocessing = false;
+        // isInteractingWithReprocessing removed - reprocessing now per-strategy configuration
         let isInteractingWithCleanup = false;
 
         // State for orders and strategies
@@ -1068,7 +1030,7 @@
                     loadOrders(),
                     updateOrdersStats(),
                     loadCleanupConfig(),
-                    loadReprocessingHealth(),
+                    // loadReprocessingHealth() removed - reprocessing now per-strategy
                     loadAdminActionsLog(),
                     updateChartsWithData(),
                     loadActiveStrategyIndicator(),
@@ -1084,7 +1046,8 @@
                         const functionNames = [
                             'loadSystemStatus', 'loadSellAllList', 'loadTopNTickers', 
                             'loadAuditTrail', 'loadOrders', 'updateOrdersStats',
-                            'loadCleanupConfig', 'loadReprocessingHealth', 'loadAdminActionsLog',
+                            'loadCleanupConfig', 'loadAdminActionsLog',
+                            // 'loadReprocessingHealth' removed - reprocessing now per-strategy
                             'updateChartsWithData', 'loadActiveStrategyIndicator', 'loadFinvizStrategies'
                         ];
                         console.warn(`Failed to load ${functionNames[index]}:`, result.reason);
@@ -1118,9 +1081,10 @@
             document.getElementById('refreshSellAllBtn')?.addEventListener('click', loadSellAllList);
             document.getElementById('refreshTopNBtn')?.addEventListener('click', loadTopNTickers);
 
-            // Reprocessing Controls
-            document.getElementById('reprocessingModeSelect')?.addEventListener('change', handleReprocessingModeChange);
-            document.getElementById('applyReprocessingConfigBtn')?.addEventListener('click', applyReprocessingConfig);
+            // Reprocessing Controls REMOVED - now configured per Finviz Strategy
+            // Use Configuration Modal > Finviz Strategies Tab to configure reprocessing
+            // document.getElementById('reprocessingModeSelect')?.addEventListener('change', handleReprocessingModeChange);
+            // document.getElementById('applyReprocessingConfigBtn')?.addEventListener('click', applyReprocessingConfig);
 
             // Cleanup Controls
             document.getElementById('saveCleanupConfigBtn')?.addEventListener('click', saveCleanupConfig);
@@ -1188,7 +1152,6 @@
                     if (d.metrics) updateMetrics(d.metrics);
                     if (d.system_info) {
                         updateSystemStatus(d.system_info);
-                        updateReprocessingCard(d.system_info);
                         updateCleanupCard(d.system_info);
                         updateActiveStrategyIndicator(d.system_info.active_strategy);
                     }
@@ -1393,7 +1356,6 @@
                 if (data.system_info) {
                     updateSystemStatus(data.system_info);
                     updateActiveStrategyIndicator(data.system_info.active_strategy);
-                    updateReprocessingCard(data.system_info);
                 }
                 
                 // Update charts with current data
@@ -1820,117 +1782,10 @@
         }
 
         // =========================================================================
-        // REPROCESSING ENGINE MANAGEMENT
+        // REPROCESSING ENGINE MANAGEMENT - REMOVED
         // =========================================================================
-
-        function handleReprocessingModeChange() {
-            const mode = document.getElementById('reprocessingModeSelect')?.value;
-            const windowContainer = document.getElementById('reprocessingWindowContainer');
-            
-            if (windowContainer) {
-                windowContainer.style.display = mode === 'window' ? 'block' : 'none';
-            }
-        }
-
-        async function applyReprocessingConfig() {
-            if (isInteractingWithReprocessing) return;
-            isInteractingWithReprocessing = true;
-            
-            try {
-                const token = getAdminToken();
-                if (!token) return;
-                
-                const mode = document.getElementById('reprocessingModeSelect')?.value;
-                const windowSeconds = document.getElementById('reprocessingWindowInput')?.value;
-                
-                // Use system config endpoint for reprocessing settings
-                const config = {
-                    token,
-                    reprocess_enabled: mode !== 'disabled',
-                    reprocess_window_seconds: mode === 'window' ? parseInt(windowSeconds) : (mode === 'infinite' ? 0 : 300)
-                };
-                
-                const response = await fetch('/admin/system/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(config)
-                });
-                
-                if (response.ok) {
-                    showAlert('Reprocessing configuration applied', 'success');
-                    loadReprocessingHealth();
-                } else {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-            } catch (error) {
-                showAlert(`Error applying config: ${error.message}`, 'danger');
-            } finally {
-                isInteractingWithReprocessing = false;
-            }
-        }
-
-        async function loadReprocessingHealth() {
-            try {
-                // Get reprocessing info from system status
-                const response = await fetch('/admin/system-info');
-                const data = await response.json();
-                const systemInfo = data.system_info || {};
-                
-                updateReprocessingCard(systemInfo);
-            } catch (error) {
-                console.error('Error loading reprocessing health:', error);
-            }
-        }
-
-        function updateReprocessingCard(systemInfo) {
-            const statusEl = document.getElementById('reprocessingEngineStatus');
-            const healthEl = document.getElementById('reprocessingHealthStatus');
-            const detailsEl = document.getElementById('reprocessingHealthDetails');
-            const modeSelect = document.getElementById('reprocessingModeSelect');
-            
-            if (!systemInfo) return;
-            
-            const reprocessEnabled = systemInfo.reprocess_enabled || false;
-            const reprocessMode = systemInfo.reprocess_mode || 'Disabled';
-            const reprocessWindow = systemInfo.reprocess_window_seconds || 300;
-            
-            // Update status indicator
-            if (statusEl) {
-                statusEl.textContent = reprocessEnabled ? 'ENABLED' : 'DISABLED';
-                statusEl.className = `badge fs-6 ${reprocessEnabled ? 'bg-success' : 'bg-secondary'}`;
-            }
-            
-            // Update mode select to match current config
-            if (modeSelect) {
-                if (!reprocessEnabled) {
-                    modeSelect.value = 'disabled';
-                } else if (reprocessWindow === 0) {
-                    modeSelect.value = 'infinite';
-                } else {
-                    modeSelect.value = 'window';
-                }
-                handleReprocessingModeChange(); // Update visibility of window input
-            }
-            
-            // Update window input
-            const windowInput = document.getElementById('reprocessingWindowInput');
-            if (windowInput && reprocessWindow > 0) {
-                windowInput.value = reprocessWindow;
-            }
-            
-            // Show/hide health details based on status
-            if (detailsEl && healthEl) {
-                if (reprocessEnabled) {
-                    detailsEl.style.display = 'block';
-                    healthEl.style.display = 'inline';
-                    healthEl.textContent = `HEALTH: ${reprocessMode}`;
-                    healthEl.className = 'badge bg-info fs-6';
-                } else {
-                    detailsEl.style.display = 'none';
-                    healthEl.style.display = 'none';
-                }
-            }
-        }
+        // Reprocessing is now configured per Finviz Strategy in Configuration Modal
+        // Use Configuration Modal > Finviz Strategies Tab to configure reprocessing
 
         // =========================================================================
         // CLEANUP CONFIGURATION
@@ -3072,7 +2927,6 @@
                 if (data.data.system_info) {
                     updateSystemStatus(data.data.system_info);
                     updateActiveStrategyIndicator(data.data.system_info.active_strategy);
-                    updateReprocessingCard(data.data.system_info);
                 }
                 
                 // Update charts with current data
