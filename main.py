@@ -49,9 +49,9 @@ from fastapi.staticfiles import StaticFiles
 # from prometheus_fastapi_instrumentator import Instrumentator # For Prometheus
 
 from config import settings, FINVIZ_UPDATE_TOKEN, FINVIZ_CONFIG_FILE, DEFAULT_TICKER_REFRESH_SEC, get_max_req_per_min, get_max_concurrency, get_finviz_tickers_per_page
-from models import Signal, SellIndividualPayload, TokenPayload, AuditTrailQuery, AuditTrailResponse
+from models import Signal, SellIndividualPayload, ClosePositionPayload, TokenPayload, AuditTrailQuery, AuditTrailResponse
 # Remove direct networking imports from finviz, keep parser if needed elsewhere or refactor finviz.py
-from finviz import load_finviz_config, persist_finviz_config_from_dict # Keep config helpers
+# from finviz import load_finviz_config, persist_finviz_config_from_dict # REMOVED - database-only configuration
 
 from comm_engine import comm_engine  # Import centralized communication engine
 from finviz_engine import FinvizEngine, FinvizConfig # Import the new engine
@@ -324,29 +324,42 @@ async def _forwarding_worker(worker_id: int) -> None:
                     )
                     response.raise_for_status()
                     
-                    # --- IMPROVED SELL DETECTION LOGIC ---
-                    # After a successful forward, check if it was a sell signal to close the position
+                    # --- IMPROVED POSITION CLOSE DETECTION LOGIC ---
+                    # After a successful forward, check if it was a signal to close the position
                     sig_action = (getattr(signal, 'action', '') or '').lower()
                     sig_side = (getattr(signal, 'side', '') or '').lower()
                     
                     # Log signal details for debugging
                     _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Signal details - side: '{sig_side}', action: '{sig_action}'")
                     
-                    # More precise SELL detection - prioritize 'side' over 'action'
-                    is_sell_signal = False
-                    if sig_side in {"sell"}:
-                        is_sell_signal = True
-                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Detected as SELL signal based on side: '{sig_side}'")
-                    elif sig_side in {"buy", "long", "enter"}:
-                        is_sell_signal = False
-                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Detected as BUY signal based on side: '{sig_side}' - NO position closing needed")
-                    elif sig_action in {"sell", "exit", "close"}:
-                        is_sell_signal = True
-                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Detected as SELL signal based on action: '{sig_action}'")
-                    else:
-                        _logger.warning(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Ambiguous signal type - side: '{sig_side}', action: '{sig_action}' - assuming BUY (no position closing)")
+                    # Priority logic for position closing detection
+                    is_position_close = False
                     
-                    if is_sell_signal:
+                    # 1. Primary: action="exit" or "close" indicates position closing
+                    if sig_action in {"exit", "close"}:
+                        is_position_close = True
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Position close detected via action: '{sig_action}'")
+                    
+                    # 2. Secondary: explicit buy/enter actions are position opens
+                    elif sig_action in {"buy", "enter", "long"}:
+                        is_position_close = False
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Position open detected via action: '{sig_action}' - NO position closing needed")
+                    
+                    # 3. Tertiary: side-based detection for compatibility (legacy behavior)
+                    elif sig_side in {"sell"} and not sig_action:
+                        is_position_close = True
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Position close assumed via side: '{sig_side}' (no action specified - legacy)")
+                    
+                    # 4. Fallback: assume position open for buy sides
+                    elif sig_side in {"buy", "long", "enter"}:
+                        is_position_close = False
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Position open detected via side: '{sig_side}'")
+                    
+                    else:
+                        is_position_close = False
+                        _logger.warning(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Ambiguous signal - assuming position open: side='{sig_side}', action='{sig_action}'")
+                    
+                    if is_position_close:
                         closed = await db_manager.close_position(exit_signal_id=signal_id)
                         if closed:
                             # Broadcast updated sell_all list after position is closed
@@ -354,9 +367,9 @@ async def _forwarding_worker(worker_id: int) -> None:
                             await comm_engine.trigger_sell_all_list_update(sell_all_data)
                             _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Position closed and Sell All list updated.")
                         else:
-                             _logger.warning(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] A sell signal was forwarded, but no corresponding 'closing' position was found in DB to finalize.")
+                             _logger.warning(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] A close signal was forwarded, but no corresponding 'closing' position was found in DB to finalize.")
                     else:
-                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] BUY signal forwarded - position remains OPEN")
+                        _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Position open signal forwarded - no position closing needed")
                     # --- END OF IMPROVED LOGIC ---
                     
                     _logger.info(f"[FORWARDING WORKER {worker_id}] [SIGNAL: {signal_id}] Signal forwarded successfully - HTTP {response.status_code}")
@@ -909,6 +922,13 @@ async def _startup() -> None:
                         # Calculate uptime
                         start_time = shared_state["signal_metrics"]["metrics_start_time"]
                         uptime_seconds = time.time() - start_time if start_time else 0
+                        
+                        # Ensure uptime is never negative
+                        if uptime_seconds < 0:
+                            _logger.warning(f"Negative uptime detected in broadcast: {uptime_seconds}. Resetting metrics start time.")
+                            shared_state["signal_metrics"]["metrics_start_time"] = time.time()
+                            uptime_seconds = 0
+                            
                         system_info["uptime_seconds"] = uptime_seconds
                         
                         # Send metrics update with real-time data
@@ -1152,8 +1172,8 @@ async def update_finviz_engine_config(request: Request, payload: dict = Body(...
 @log_admin_action("config_update", "update_dest_webhook")
 async def update_dest_webhook(request: Request, payload: dict = Body(...)):
     """
-    Updates the destination webhook URL.
-    Expects a JSON: {"webhook_url": "<new_url>", "token": "<token>"}
+    Updates the destination webhook URL and timeout.
+    Expects a JSON: {"webhook_url": "<new_url>", "timeout": <seconds>, "token": "<token>"}
     """
     token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
@@ -1169,13 +1189,26 @@ async def update_dest_webhook(request: Request, payload: dict = Body(...)):
         settings.DEST_WEBHOOK_URL = webhook_url
         _logger.info(f"Destination webhook URL updated to: {webhook_url}")
         
+        # Update timeout if provided
+        timeout = payload.get("timeout")
+        if timeout is not None:
+            timeout_value = int(timeout)
+            if 1 <= timeout_value <= 60:  # Validate timeout range
+                settings.DEST_WEBHOOK_TIMEOUT = timeout_value
+                _logger.info(f"Destination webhook timeout updated to: {timeout_value}s")
+            else:
+                _logger.warning(f"Invalid timeout value: {timeout_value}. Must be between 1-60 seconds.")
+        
         # Broadcast update to admin clients
         webhook_config_data = await get_webhook_config_data()
         await comm_engine.trigger_webhook_config_update(webhook_config_data)
         
+    except ValueError as e:
+        _logger.warning(f"Invalid timeout value: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid timeout value")
     except Exception as e:
         _logger.error(f"Error updating destination webhook: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating webhook URL.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating webhook configuration.")
 
 
 @app.post("/admin/metrics/reset", status_code=status.HTTP_204_NO_CONTENT)
@@ -1346,9 +1379,18 @@ async def get_system_info():
             approved_count = signal_processing_metrics["signals_approved"]
 
             # Calculate uptime from metrics start time
-            current_time = asyncio.get_event_loop().time()
+            current_time = time.time()  # Use time.time() to match metrics_start_time scale
             start_time = shared_state["signal_metrics"]["metrics_start_time"]
             uptime_seconds = current_time - start_time if start_time else 0
+            
+            # Debug log for uptime calculation
+            _logger.debug(f"Uptime calculation - current_time: {current_time}, start_time: {start_time}, uptime_seconds: {uptime_seconds}")
+            
+            # Ensure uptime is never negative
+            if uptime_seconds < 0:
+                _logger.warning(f"Negative uptime detected: {uptime_seconds}. Resetting metrics start time.")
+                shared_state["signal_metrics"]["metrics_start_time"] = current_time
+                uptime_seconds = 0
 
             # Calculate percentage rates
             approval_rate = (approved_count / total_processed * 100) if total_processed > 0 else 0
@@ -1401,12 +1443,16 @@ async def get_system_info():
             # Check if rate limiting is disabled (paused)
             webhook_rate_limiter_paused = not rate_limiter.rate_limiting_enabled
 
-        # Get reprocess status from finviz config
+        # Get reprocess status from active Finviz strategy in database
         try:
-            finviz_config = load_finviz_config()
-            reprocess_enabled = finviz_config.get("reprocess_enabled", False)
+            engine = shared_state.get("finviz_engine_instance")
+            if engine:
+                config = await engine.get_config()
+                reprocess_enabled = config.reprocess_enabled
+            else:
+                reprocess_enabled = False
         except Exception as e:
-            _logger.warning(f"Could not load finviz config for reprocess status: {e}")
+            _logger.warning(f"Could not load active finviz strategy for reprocess status: {e}")
             reprocess_enabled = False
 
         return {
@@ -1496,6 +1542,78 @@ async def sell_individual_order(request: Request, payload: SellIndividualPayload
     except Exception as e:
         _logger.error(f"Error queueing sell signal for {normalised_ticker}: {e}")
         raise HTTPException(status_code=500, detail=f"Error queueing sell signal: {str(e)}")
+
+@app.post("/admin/order/close-position", status_code=status.HTTP_200_OK)
+@log_admin_action("order_management", "close_position")
+async def close_position_endpoint(request: Request, payload: ClosePositionPayload):
+    # Token validation
+    if payload.token != FINVIZ_UPDATE_TOKEN:
+        _logger.warning("Invalid token received for /admin/order/close-position.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+
+    _logger.info(f"Received close position request for ticker: {payload.ticker}")
+    normalised_ticker = payload.ticker.strip().upper()
+
+    # Create Signal object with action="exit"
+    signal_to_queue = Signal(
+        ticker=normalised_ticker, 
+        side='sell',
+        action='exit'  # CRÍTICO: Definir action="exit"
+    )
+
+    # Create signal in database FIRST (before marking position as closing)
+    from database.simple_models import SignalTypeEnum
+    try:
+        signal_id = await db_manager.create_signal_with_initial_event(
+            signal_to_queue, 
+            SignalTypeEnum.POSITION_CLOSE
+        )
+        _logger.info(f"Position close signal created with ID: {signal_id}")
+    except Exception as e:
+        _logger.error(f"Error creating signal: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating signal: {str(e)}")
+
+    # Mark position as CLOSING in database (after signal exists in DB)
+    position_marked = await db_manager.mark_position_as_closing(
+        ticker=normalised_ticker, 
+        exit_signal_id=signal_to_queue.signal_id
+    )
+    
+    if not position_marked:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail=f"No open position found for {normalised_ticker}"
+        )
+
+    # Update metrics
+    shared_state["signal_metrics"]["signals_received"] += 1
+    
+    # Queue for processing
+    approved_signal_data = {
+        'signal': signal_to_queue,
+        'ticker': signal_to_queue.normalised_ticker(),
+        'approved_at': time.time(),
+        'worker_id': 'admin_close_position',
+        'signal_id': signal_to_queue.signal_id
+    }
+
+    try:
+        await approved_signal_queue.put(approved_signal_data)
+        _logger.info(f"Close signal for {normalised_ticker} queued successfully.")
+        
+        # Broadcast updated positions
+        sell_all_data = await get_sell_all_list_data()
+        await comm_engine.trigger_sell_all_list_update(sell_all_data)
+
+        return {
+            "message": f"Position close signal for {normalised_ticker} queued successfully", 
+            "signal_id": signal_to_queue.signal_id,
+            "action": "exit"
+        }
+        
+    except Exception as e:
+        _logger.error(f"Error queueing close signal: {e}")
+        raise HTTPException(status_code=500, detail=f"Error queueing close signal: {str(e)}")
 
 @app.post("/admin/order/sell-all", status_code=status.HTTP_200_OK)
 @log_admin_action("order_management", "sell_all_orders")
@@ -1764,9 +1882,18 @@ async def update_webhook_rate_limiter_config(request: Request, payload: dict = B
     
     try:
         max_req_per_min = payload.get("max_req_per_min")
+        rate_limiting_enabled = payload.get("rate_limiting_enabled")
+        
+        # Update configuration
+        await webhook_rl.update_config(
+            max_req_per_min=int(max_req_per_min) if max_req_per_min is not None else None,
+            enabled=rate_limiting_enabled if rate_limiting_enabled is not None else None
+        )
+        
         if max_req_per_min is not None:
-            await webhook_rl.update_config(max_req_per_min=int(max_req_per_min))
             _logger.info(f"Webhook rate limiter max_req_per_min updated to: {max_req_per_min}")
+        if rate_limiting_enabled is not None:
+            _logger.info(f"Webhook rate limiter enabled status updated to: {rate_limiting_enabled}")
         
     except ValueError as e:
         _logger.warning(f"Invalid webhook rate limiter config: {e}")
@@ -2062,17 +2189,43 @@ async def update_system_config(payload: dict = Body(...)):
 
 @app.websocket("/ws/admin-updates")
 async def admin_updates_ws(websocket: WebSocket):
-    """WebSocket endpoint para atualizações admin em tempo real"""
-    await websocket.accept()
-    await comm_engine.add_connection(websocket)
+    """WebSocket endpoint para atualizações admin em tempo real com melhor handling"""
+    client_info = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+    _logger.info(f"New admin WebSocket connection attempt from: {client_info}")
+    
     try:
+        await websocket.accept()
+        _logger.info(f"WebSocket connection accepted for: {client_info}")
+        
+        await comm_engine.add_connection(websocket)
+        
+        # Send initial metrics to new connection
+        try:
+            initial_metrics = get_current_metrics()
+            await websocket.send_json({
+                "type": "metrics_update",
+                "data": initial_metrics
+            })
+            _logger.info(f"Initial metrics sent to: {client_info}")
+        except Exception as e:
+            _logger.error(f"Failed to send initial metrics to {client_info}: {e}")
+        
+        # Keep connection alive with periodic pings
         while True:
-            await asyncio.sleep(3600)  # Keep connection alive
+            try:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                await websocket.ping()
+            except Exception as ping_error:
+                _logger.warning(f"Ping failed for {client_info}: {ping_error}")
+                break
+                
     except WebSocketDisconnect:
-        await comm_engine.remove_connection(websocket)
+        _logger.info(f"WebSocket disconnected normally: {client_info}")
     except Exception as e:
-        _logger.error(f"WebSocket error: {e}")
+        _logger.error(f"WebSocket error for {client_info}: {e}")
+    finally:
         await comm_engine.remove_connection(websocket)
+        _logger.info(f"WebSocket connection cleaned up for: {client_info}")
 
 # Add compatibility endpoint - redirects to system-info.
 @app.get("/admin/status")
@@ -2206,6 +2359,13 @@ async def clear_database(request: Request, payload: dict = Body(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error clearing database: {str(e)}")
 
 
+# New endpoint with frontend-expected URL pattern
+@app.post("/admin/database/clear")
+@log_admin_action("database_operation", "clear_database_new_url")
+async def clear_database_new_url(request: Request, payload: dict = Body(...)):
+    """Limpa completamente todos os dados do banco de dados. OPERAÇÃO DESTRUTIVA! (New URL pattern)"""
+    # Delegate to existing implementation
+    return await clear_database(request, payload)
 @app.get("/admin/export-csv")
 async def export_database_csv():
     """Exporta todos os dados do banco para CSV."""
@@ -2256,20 +2416,29 @@ async def export_database_csv():
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error exporting data: {str(e)}")
 
 
+# New endpoint with frontend-expected URL pattern
+@app.get("/admin/database/export")
+async def export_database_csv_new_url():
+    """Exporta todos os dados do banco para CSV. (New URL pattern)"""
+    # Delegate to existing implementation
+    return await export_database_csv()
+
 @app.post("/admin/import-csv")
 @log_admin_action("file_import", "import_database_csv")
-async def import_database_csv(request: Request, payload: dict = Body(...)):
+async def import_database_csv(request: Request, file: UploadFile = File(...), token: str = Form(...)):
     """Importa dados de CSV para o banco de dados."""
-    token = payload.get("token")
     if token != FINVIZ_UPDATE_TOKEN:
         _logger.warning("Invalid token received for /admin/import-csv.")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
     
-    csv_data = payload.get("csv_data")
-    if not csv_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV data is required")
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File must be a CSV file")
     
     try:
+        # Read CSV file content
+        csv_content = await file.read()
+        csv_data = csv_content.decode('utf-8')
+        
         # Parse CSV data
         reader = csv.DictReader(io.StringIO(csv_data))
         
@@ -2286,6 +2455,15 @@ async def import_database_csv(request: Request, payload: dict = Body(...)):
     except Exception as e:
         _logger.error(f"Error importing CSV: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error importing CSV: {str(e)}")
+
+
+# New endpoint with frontend-expected URL pattern
+@app.post("/admin/database/import")
+@log_admin_action("file_import", "import_database_csv_new_url")
+async def import_database_csv_new_url(request: Request, file: UploadFile = File(...), token: str = Form(...)):
+    """Importa dados de CSV para o banco de dados. (New URL pattern)"""
+    # Delegate to existing implementation
+    return await import_database_csv(request, file, token)
 
 @app.post("/admin/sell-all/config", status_code=status.HTTP_204_NO_CONTENT)
 async def update_sell_all_config(payload: dict = Body(...)):

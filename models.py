@@ -50,6 +50,13 @@ class SellIndividualPayload(BaseModel):
     token: str
 
 
+class ClosePositionPayload(BaseModel):
+    model_config = {"extra": "allow"}
+    
+    ticker: str
+    token: str
+
+
 class TokenPayload(BaseModel):
     model_config = {"extra": "allow"}
     

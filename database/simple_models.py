@@ -31,6 +31,7 @@ class SignalTypeEnum(enum.Enum):
     BUY = "buy"
     SELL = "sell" 
     MANUAL_SELL = "manual_sell"
+    POSITION_CLOSE = "position_close"
     SELL_ALL = "sell_all"
 
 class SignalLocationEnum(enum.Enum):

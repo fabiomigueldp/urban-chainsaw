@@ -515,22 +515,34 @@
                     </div>
                     <div class="card-body">
                         <div class="action-buttons">
-                            <button id="pauseEngineBtn" class="btn btn-warning btn-sm">
+                            <button id="pauseEngineBtn" class="btn btn-warning btn-sm" 
+                                    data-bs-toggle="tooltip" data-bs-placement="top" 
+                                    title="Pause the Finviz engine to stop processing new signals">
                                 <i class="bi bi-pause"></i> Pause Engine
                             </button>
-                            <button id="resumeEngineBtn" class="btn btn-success btn-sm">
+                            <button id="resumeEngineBtn" class="btn btn-success btn-sm"
+                                    data-bs-toggle="tooltip" data-bs-placement="top" 
+                                    title="Resume the Finviz engine to continue processing signals">
                                 <i class="bi bi-play"></i> Resume Engine
                             </button>
-                            <button id="refreshEngineBtn" class="btn btn-info btn-sm">
+                            <button id="refreshEngineBtn" class="btn btn-info btn-sm"
+                                    data-bs-toggle="tooltip" data-bs-placement="top" 
+                                    title="Trigger an immediate refresh of ticker data from Finviz">
                                 <i class="bi bi-arrow-clockwise refresh-btn"></i> Refresh Tickers
                             </button>
-                            <button id="resetMetricsBtn" class="btn btn-secondary btn-sm">
+                            <button id="resetMetricsBtn" class="btn btn-secondary btn-sm"
+                                    data-bs-toggle="tooltip" data-bs-placement="top" 
+                                    title="Reset all signal processing metrics and counters to zero">
                                 <i class="bi bi-arrow-counterclockwise"></i> Reset Metrics
                             </button>
-                            <button id="pauseRateLimiterBtn" class="btn btn-warning btn-sm">
+                            <button id="pauseRateLimiterBtn" class="btn btn-warning btn-sm"
+                                    data-bs-toggle="tooltip" data-bs-placement="top" 
+                                    title="Pause rate limiting (same as disabling Rate Limiting in System Settings)">
                                 <i class="bi bi-pause"></i> Pause Rate Limiter
                             </button>
-                            <button id="resumeRateLimiterBtn" class="btn btn-success btn-sm">
+                            <button id="resumeRateLimiterBtn" class="btn btn-success btn-sm"
+                                    data-bs-toggle="tooltip" data-bs-placement="top" 
+                                    title="Resume rate limiting (same as enabling Rate Limiting in System Settings)">
                                 <i class="bi bi-play"></i> Resume Rate Limiter
                             </button>
                         </div>
@@ -945,6 +957,19 @@
         // isInteractingWithReprocessing removed - reprocessing now per-strategy configuration
         let isInteractingWithCleanup = false;
 
+        // WebSocket fallback state
+        let websocketFailureCount = 0;
+        let httpFallbackActive = false;
+        let httpFallbackInterval = null;
+        
+        // Debug metrics
+        let debugMetrics = {
+            websocketMessagesReceived: 0,
+            metricsUpdatesReceived: 0,
+            httpFallbackRequests: 0,
+            lastMetricsUpdate: null
+        };
+
         // State for orders and strategies
         let ordersData = [];
         let ordersFilters = { status: 'all', ticker: '' };
@@ -966,6 +991,12 @@
             initializeWebSocket();
             initializeCharts();
             
+            // Initialize Bootstrap tooltips
+            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+            
             // Load initial data
             loadInitialData();
             bindEventHandlers();
@@ -974,12 +1005,15 @@
             setInterval(() => {
                 if (!document.hidden) { // Only refresh if tab is active
                     loadAuditTrail();
+                    loadOrders(); // Add real-time orders refresh
                     updateOrdersStats();
                     loadAdminActionsLog();
                     // Also refresh active strategy indicator
                     loadActiveStrategyIndicator();
+                    // ✅ ADDED: Load system status and metrics for real-time updates
+                    loadSystemStatus();
                 }
-            }, 30000);
+            }, 10000); // Reduced to 10 seconds for better real-time feel
             
             console.log('Application initialization completed');
         });
@@ -993,27 +1027,112 @@
          */
         function initializeWebSocket() {
             if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+                console.log('WebSocket already connected/connecting, skipping initialization');
                 return; // Already connected or connecting
             }
+            
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/admin-updates`;
+            console.log('🔌 Initializing WebSocket connection to:', wsUrl);
 
             socket = new WebSocket(wsUrl);
 
-            socket.onopen = () => updateConnectionStatus(true);
-            socket.onclose = () => {
+            socket.onopen = () => {
+                console.log('✅ WebSocket connected successfully');
+                websocketFailureCount = 0; // Reset failure count
+                deactivateHttpFallback(); // Disable HTTP fallback
+                updateConnectionStatus(true);
+            };
+            
+            socket.onclose = (event) => {
+                console.log('🔌 WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
                 updateConnectionStatus(false);
+                
+                websocketFailureCount++;
+                
+                if (websocketFailureCount >= 3 && !httpFallbackActive) {
+                    console.log('⚠️ WebSocket failed multiple times, activating HTTP fallback');
+                    activateHttpFallback();
+                }
+                
                 setTimeout(initializeWebSocket, 5000); // Reconnect logic
             };
-            socket.onerror = () => updateConnectionStatus(false);
+            
+            socket.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+                updateConnectionStatus(false);
+            };
+            
             socket.onmessage = (event) => {
+                console.log('📨 WebSocket message received:', event.data);
+                debugMetrics.websocketMessagesReceived++;
                 try {
                     const message = JSON.parse(event.data);
                     handleWebSocketMessage(message);
                 } catch (error) {
-                    console.error("Error parsing WebSocket message:", error);
+                    console.error("❌ Error parsing WebSocket message:", error);
                 }
             };
+        }
+
+        /**
+         * Activate HTTP fallback when WebSocket fails repeatedly
+         */
+        function activateHttpFallback() {
+            if (httpFallbackActive) return;
+            
+            httpFallbackActive = true;
+            console.log('🔄 Activating HTTP fallback for metrics');
+            
+            httpFallbackInterval = setInterval(() => {
+                console.log('📡 HTTP fallback: fetching metrics');
+                debugMetrics.httpFallbackRequests++;
+                loadSystemStatus(); // Fetch via HTTP
+            }, 5000); // More frequent updates during fallback
+        }
+
+        /**
+         * Deactivate HTTP fallback when WebSocket is restored
+         */
+        function deactivateHttpFallback() {
+            if (!httpFallbackActive) return;
+            
+            httpFallbackActive = false;
+            console.log('✅ Deactivating HTTP fallback - WebSocket restored');
+            
+            if (httpFallbackInterval) {
+                clearInterval(httpFallbackInterval);
+                httpFallbackInterval = null;
+            }
+        }
+
+        /**
+         * Validate metrics data structure
+         */
+        function validateMetricsData(metrics) {
+            const requiredFields = [
+                'signals_received', 'signals_approved', 'signals_rejected',
+                'signals_forwarded_success', 'processing_queue_size', 'approved_queue_size'
+            ];
+            
+            for (const field of requiredFields) {
+                if (typeof metrics[field] !== 'number') {
+                    console.error(`❌ Missing or invalid metrics field: ${field}`);
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+
+        /**
+         * Show debug information in console
+         */
+        function showDebugInfo() {
+            console.log('🔍 Debug Metrics:', debugMetrics);
+            console.log('🔍 WebSocket State:', socket ? socket.readyState : 'No socket');
+            console.log('🔍 HTTP Fallback:', httpFallbackActive);
+            console.log('🔍 WebSocket Failure Count:', websocketFailureCount);
         }
 
         /**
@@ -1115,6 +1234,16 @@
             document.getElementById('openConfigBtn')?.addEventListener('click', openConfigModal);
             document.getElementById('setTokenBtn')?.addEventListener('click', setAdminToken);
 
+            // System Settings Configuration
+            document.getElementById('updateWebhookBtn')?.addEventListener('click', updateWebhookConfig);
+            document.getElementById('updateRateLimiterBtn')?.addEventListener('click', updateRateLimiterConfig);
+
+            // Admin Token Management
+            document.getElementById('saveTokenBtn')?.addEventListener('click', saveAdminToken);
+            document.getElementById('clearTokenBtn')?.addEventListener('click', clearAdminToken);
+            document.getElementById('toggleTokenVisibility')?.addEventListener('click', toggleTokenVisibility);
+            document.getElementById('loadCurrentConfigBtn')?.addEventListener('click', loadCurrentConfig);
+
             // Strategy Management in Modals
             document.getElementById('addNewStrategyBtn')?.addEventListener('click', addNewStrategy);
             document.getElementById('saveStrategyBtn')?.addEventListener('click', saveStrategyChanges);
@@ -1144,12 +1273,30 @@
         // =========================================================================
 
         function handleWebSocketMessage(data) {
-            if (!data || !data.type) return;
+            if (!data || !data.type) {
+                console.warn('⚠️ Invalid WebSocket message format:', data);
+                return;
+            }
+
+            console.log(`📦 Processing WebSocket message type: ${data.type}`);
 
             const handlers = {
-                'metrics_update': (d) => updateMetrics(d),
+                'metrics_update': (d) => {
+                    if (validateMetricsData(d)) {
+                        updateMetrics(d);
+                        console.log('✅ Metrics updated via WebSocket');
+                    } else {
+                        console.error('❌ Invalid metrics data received:', d);
+                    }
+                },
                 'status_update': (d) => {
-                    if (d.metrics) updateMetrics(d.metrics);
+                    if (d.metrics) {
+                        if (validateMetricsData(d.metrics)) {
+                            updateMetrics(d.metrics);
+                        } else {
+                            console.error('❌ Invalid metrics in status_update:', d.metrics);
+                        }
+                    }
                     if (d.system_info) {
                         updateSystemStatus(d.system_info);
                         updateCleanupCard(d.system_info);
@@ -1162,8 +1309,10 @@
                 },
                 'order_status_change': (d) => handleOrdersWebSocketMessage(d),
                 'metrics_reset': (d) => {
-                    updateMetrics(d);
-                    showAlert('Metrics reset successfully.', 'info');
+                    if (validateMetricsData(d)) {
+                        updateMetrics(d);
+                        showAlert('Metrics reset successfully.', 'info');
+                    }
                 },
                 'top_n_tickers_update': (d) => updateTopNTickers(d),
                 'finviz_strategy_changed': (d) => {
@@ -1184,6 +1333,8 @@
 
             if (handlers[data.type] && data.data) {
                 handlers[data.type](data.data);
+            } else {
+                console.warn(`⚠️ No handler for WebSocket message type: ${data.type}`);
             }
         }
 
@@ -1195,13 +1346,14 @@
             const indicator = document.getElementById('connectionIndicator');
             const text = document.getElementById('connectionText');
             const alert = document.getElementById('connectionStatus');
+            
             if (isConnected) {
                 indicator.className = 'status-indicator status-online';
-                text.textContent = 'Connected';
+                text.textContent = httpFallbackActive ? 'Connected (HTTP Fallback)' : 'Connected';
                 alert.style.display = 'none';
             } else {
                 indicator.className = 'status-indicator status-offline';
-                text.textContent = 'Disconnected';
+                text.textContent = httpFallbackActive ? 'Disconnected (HTTP Fallback Active)' : 'Disconnected';
                 alert.style.display = 'block';
             }
         }
@@ -1235,7 +1387,7 @@
                         labels: ['Approved', 'Rejected'], 
                         datasets: [{ 
                             data: [0, 0], 
-                            backgroundColor: ['#198754', '#ffc107'] 
+                            backgroundColor: ['#198754', '#dc3545'] 
                         }] 
                     }, 
                     options: { 
@@ -1264,6 +1416,11 @@
 
         function updateMetrics(metrics) {
             if (!metrics) return;
+            
+            debugMetrics.metricsUpdatesReceived++;
+            debugMetrics.lastMetricsUpdate = new Date().toISOString();
+            
+            console.log(`📊 Updating metrics (update #${debugMetrics.metricsUpdatesReceived}):`, metrics);
             
             const signalsReceived = document.getElementById('signalsReceived');
             const signalsApproved = document.getElementById('signalsApproved');
@@ -1319,13 +1476,26 @@
                 rateLimiterStatus.textContent = info.webhook_rate_limiter_paused ? 'Paused' : 'Running';
             }
             if (tickerCount) tickerCount.textContent = info.finviz_ticker_count ?? '-';
-            if (uptime) uptime.textContent = info.uptime_seconds ? formatUptime(info.uptime_seconds) : '-';
+            if (uptime) {
+                const uptimeValue = info.uptime_seconds;
+                console.log('Uptime seconds received:', uptimeValue, 'type:', typeof uptimeValue);
+                uptime.textContent = uptimeValue ? formatUptime(uptimeValue) : '-';
+            }
         }
 
         function formatUptime(seconds) {
-            const d = Math.floor(seconds / (3600*24));
-            const h = Math.floor(seconds % (3600*24) / 3600);
-            const m = Math.floor(seconds % 3600 / 60);
+            // Validate input and handle edge cases
+            if (!seconds || seconds < 0) {
+                return '0d 0h 0m';
+            }
+            
+            // Ensure we're working with a positive integer
+            const totalSeconds = Math.floor(Math.abs(seconds));
+            
+            const d = Math.floor(totalSeconds / (3600 * 24));
+            const h = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+            const m = Math.floor((totalSeconds % 3600) / 60);
+            
             return `${d}d ${h}h ${m}m`;
         }
 
@@ -1336,6 +1506,37 @@
             const alertHtml = `<div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
             container.insertAdjacentHTML('beforeend', alertHtml);
             setTimeout(() => document.getElementById(alertId)?.remove(), 5000);
+        }
+
+        function showLoadingAlert(message) {
+            const container = document.getElementById('alertContainer');
+            if (!container) return null;
+            const alertId = `loading-alert-${Date.now()}`;
+            const alertHtml = `<div id="${alertId}" class="alert alert-info alert-dismissible fade show" role="alert">
+                <div class="d-flex align-items-center">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    <span>${message}</span>
+                </div>
+            </div>`;
+            container.insertAdjacentHTML('beforeend', alertHtml);
+            return document.getElementById(alertId);
+        }
+
+        // Function to sync Rate Limiter switch with current status
+        async function updateRateLimiterSwitchFromStatus() {
+            try {
+                const response = await fetch('/admin/system-info');
+                if (response.ok) {
+                    const data = await response.json();
+                    const rateLimitingEnabled = !data.system_info?.webhook_rate_limiter_paused;
+                    const rateLimitingElement = document.getElementById('rateLimitingEnabled');
+                    if (rateLimitingElement) {
+                        rateLimitingElement.checked = rateLimitingEnabled;
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating rate limiter switch:', error);
+            }
         }
 
         // =========================================================================
@@ -1564,7 +1765,7 @@
 
             tbody.innerHTML = ordersData.map(order => {
                 const statusBadge = getOrderStatusBadge(order.status);
-                const duration = order.duration ? formatDuration(order.duration) : '-';
+                const duration = order.duration || '-';  // Duration already formatted from backend
                 const entryPrice = order.entry_price ? `$${order.entry_price.toFixed(2)}` : '-';
                 const exitPrice = order.exit_price ? `$${order.exit_price.toFixed(2)}` : '-';
                 const value = order.value ? `$${order.value.toFixed(2)}` : '-';
@@ -1578,7 +1779,7 @@
                         <td>${duration}</td>
                         <td>${value}</td>
                         <td>
-                            ${order.status === 'open' ? `<button class="btn btn-sm btn-warning" onclick="sellOrder('${order.ticker}')">Sell</button>` : ''}
+                            ${order.status === 'open' ? `<button class="btn btn-sm btn-danger" onclick="closePosition('${order.ticker}')">Close</button>` : ''}
                         </td>
                     </tr>
                 `;
@@ -1619,6 +1820,33 @@
             updateOrdersStats();
         }
 
+        async function closePosition(ticker) {
+            if (!confirm(`Close position for ${ticker}?`)) return;
+            
+            try {
+                const token = getAdminToken();
+                if (!token) return;
+                
+                const response = await fetch('/admin/order/close-position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token, ticker })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert(`Position closed for ${ticker}`, 'success');
+                    // Recarregar ordens para refletir mudança
+                    loadOrders();
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                showAlert(`Error closing position for ${ticker}: ${error.message}`, 'danger');
+            }
+        }
+
+        // Legacy function - mantida para compatibilidade
         async function sellOrder(ticker) {
             if (!confirm(`Sell position for ${ticker}?`)) return;
             
@@ -1765,14 +1993,29 @@
                 const token = getAdminToken();
                 if (!token) return;
                 
+                // Show loading indicator
+                const loadingAlert = showLoadingAlert('Processing command...');
+                
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ token })
                 });
                 
+                // Remove loading indicator
+                if (loadingAlert) loadingAlert.remove();
+                
                 if (response.ok) {
                     showAlert(successMessage, 'success');
+                    
+                    // Refresh system status to update UI
+                    setTimeout(() => {
+                        loadSystemStatus();
+                        // If rate limiter command, also update the System Settings switch
+                        if (endpoint.includes('webhook-rate-limiter')) {
+                            updateRateLimiterSwitchFromStatus();
+                        }
+                    }, 500);
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
@@ -1871,23 +2114,200 @@
         }
 
         // =========================================================================
+        // SYSTEM SETTINGS CONFIGURATION
+        // =========================================================================
+
+        async function updateWebhookConfig() {
+            try {
+                const token = getAdminToken();
+                if (!token) return;
+                
+                const webhookUrl = document.getElementById('webhookUrl')?.value;
+                const webhookTimeout = document.getElementById('webhookTimeout')?.value;
+                
+                if (!webhookUrl) {
+                    showAlert('Webhook URL is required', 'warning');
+                    return;
+                }
+
+                // Basic URL validation
+                try {
+                    new URL(webhookUrl);
+                } catch (e) {
+                    showAlert('Please enter a valid URL', 'warning');
+                    return;
+                }
+                
+                const response = await fetch('/admin/webhook/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        webhook_url: webhookUrl,
+                        timeout: parseInt(webhookTimeout) || 5,
+                        token: token
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert('Webhook configuration updated successfully', 'success');
+                    loadSystemStatus(); // Refresh status
+                } else {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+            } catch (error) {
+                console.error('Error updating webhook config:', error);
+                showAlert(`Error updating webhook config: ${error.message}`, 'danger');
+            }
+        }
+
+        async function updateRateLimiterConfig() {
+            try {
+                const token = getAdminToken();
+                if (!token) return;
+                
+                const maxReqPerMin = document.getElementById('maxReqPerMin')?.value;
+                const rateLimitingEnabled = document.getElementById('rateLimitingEnabled')?.checked;
+                
+                const maxReqValue = parseInt(maxReqPerMin);
+                if (isNaN(maxReqValue) || maxReqValue < 1 || maxReqValue > 1000) {
+                    showAlert('Max requests per minute must be between 1 and 1000', 'warning');
+                    return;
+                }
+                
+                // Show loading indicator
+                const loadingAlert = showLoadingAlert('Updating rate limiter configuration...');
+                
+                const response = await fetch('/admin/webhook-rate-limiter/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        max_req_per_min: maxReqValue,
+                        rate_limiting_enabled: rateLimitingEnabled,
+                        token: token
+                    })
+                });
+                
+                // Remove loading indicator
+                if (loadingAlert) loadingAlert.remove();
+                
+                if (response.ok) {
+                    showAlert('Rate limiter configuration updated successfully', 'success');
+                    
+                    // Refresh system status to update UI and sync System Controls indicators
+                    setTimeout(() => {
+                        loadSystemStatus();
+                    }, 500);
+                } else {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+            } catch (error) {
+                console.error('Error updating rate limiter config:', error);
+                showAlert(`Error updating rate limiter config: ${error.message}`, 'danger');
+            }
+        }
+
+        // =========================================================================
+        // ADMIN TOKEN MANAGEMENT
+        // =========================================================================
+
+        function saveAdminToken() {
+            const tokenInput = document.getElementById('adminToken');
+            const token = tokenInput?.value?.trim();
+            
+            if (!token) {
+                showAlert('Please enter a token first', 'warning');
+                return;
+            }
+            
+            try {
+                localStorage.setItem('admin_token', token);
+                showAlert('Admin token saved successfully', 'success');
+                
+                // Hide token after saving for security
+                tokenInput.type = 'password';
+                const toggleBtn = document.getElementById('toggleTokenVisibility');
+                if (toggleBtn) {
+                    toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
+                }
+            } catch (error) {
+                console.error('Error saving token:', error);
+                showAlert('Error saving token', 'danger');
+            }
+        }
+
+        function clearAdminToken() {
+            if (!confirm('Clear the admin token? You will need to enter it again.')) return;
+            
+            try {
+                localStorage.removeItem('admin_token');
+                const tokenInput = document.getElementById('adminToken');
+                if (tokenInput) {
+                    tokenInput.value = '';
+                    tokenInput.type = 'password';
+                }
+                
+                const toggleBtn = document.getElementById('toggleTokenVisibility');
+                if (toggleBtn) {
+                    toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
+                }
+                
+                showAlert('Admin token cleared', 'info');
+            } catch (error) {
+                console.error('Error clearing token:', error);
+                showAlert('Error clearing token', 'danger');
+            }
+        }
+
+        function toggleTokenVisibility() {
+            const tokenInput = document.getElementById('adminToken');
+            const toggleBtn = document.getElementById('toggleTokenVisibility');
+            
+            if (!tokenInput || !toggleBtn) return;
+            
+            if (tokenInput.type === 'password') {
+                tokenInput.type = 'text';
+                toggleBtn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+            } else {
+                tokenInput.type = 'password';
+                toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
+            }
+        }
+
+        // =========================================================================
         // DATABASE MANAGEMENT
         // =========================================================================
 
         async function downloadDatabaseCsv() {
             try {
+                // Show loading indicator
+                const loadingAlert = showLoadingAlert('Exporting database...');
+                
                 const response = await fetch('/admin/database/export');
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `audit_trail_${new Date().toISOString().split('T')[0]}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-                showAlert('Database exported successfully', 'success');
+                
+                // Remove loading indicator
+                if (loadingAlert) loadingAlert.remove();
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `audit_trail_${new Date().toISOString().split('T')[0]}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                    showAlert('Database exported successfully', 'success');
+                } else if (response.status === 204) {
+                    showAlert('No data available to export', 'info');
+                } else {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
             } catch (error) {
+                console.error('Error exporting database:', error);
                 showAlert(`Error exporting database: ${error.message}`, 'danger');
             }
         }
@@ -1915,11 +2335,19 @@
                 return;
             }
             
+            if (!file.name.endsWith('.csv')) {
+                showAlert('Please select a valid CSV file', 'warning');
+                return;
+            }
+            
             if (!confirm('Upload database CSV? This will replace existing data.')) return;
             
             try {
                 const token = getAdminToken();
                 if (!token) return;
+                
+                // Show loading indicator
+                const loadingAlert = showLoadingAlert('Importing CSV file...');
                 
                 const formData = new FormData();
                 formData.append('file', file);
@@ -1930,13 +2358,31 @@
                     body: formData
                 });
                 
+                // Remove loading indicator
+                if (loadingAlert) loadingAlert.remove();
+                
                 if (response.ok) {
-                    showAlert('Database imported successfully', 'success');
-                    loadAuditTrail();
+                    const result = await response.json();
+                    const importedCount = result.imported_count || 0;
+                    showAlert(`Database imported successfully! Processed ${importedCount} rows`, 'success');
+                    
+                    // Clear file input and reset UI
+                    fileInput.value = '';
+                    const uploadBtn = document.getElementById('uploadCsvBtn');
+                    const fileName = document.getElementById('csvFileName');
+                    if (uploadBtn) uploadBtn.disabled = true;
+                    if (fileName) fileName.textContent = '';
+                    
+                    // Refresh audit trail
+                    setTimeout(() => {
+                        loadAuditTrail();
+                    }, 1000);
                 } else {
-                    throw new Error(`HTTP ${response.status}`);
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
                 }
             } catch (error) {
+                console.error('Error importing database:', error);
                 showAlert(`Error importing database: ${error.message}`, 'danger');
             }
         }
@@ -1949,19 +2395,39 @@
                 const token = getAdminToken();
                 if (!token) return;
                 
+                // Show loading indicator
+                const loadingAlert = showLoadingAlert('Clearing database...');
+                
                 const response = await fetch('/admin/database/clear', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ token })
                 });
                 
+                // Remove loading indicator
+                if (loadingAlert) loadingAlert.remove();
+                
                 if (response.ok) {
-                    showAlert('Database cleared successfully', 'success');
-                    loadAuditTrail();
+                    const result = await response.json();
+                    const deletedSignals = result.deleted_signals_count || 0;
+                    const deletedEvents = result.deleted_events_count || 0;
+                    const deletedPositions = result.deleted_positions_count || 0;
+                    
+                    showAlert(
+                        `Database cleared successfully! Deleted: ${deletedSignals} signals, ${deletedEvents} events, ${deletedPositions} positions`, 
+                        'success'
+                    );
+                    
+                    // Refresh audit trail to show empty state
+                    setTimeout(() => {
+                        loadAuditTrail();
+                    }, 1000);
                 } else {
-                    throw new Error(`HTTP ${response.status}`);
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
                 }
             } catch (error) {
+                console.error('Error clearing database:', error);
                 showAlert(`Error clearing database: ${error.message}`, 'danger');
             }
         }
@@ -2655,37 +3121,6 @@
                 setTokenBtn.addEventListener('click', setAdminToken);
             }
             
-            // Bind System Settings buttons
-            const saveTokenBtn = document.getElementById('saveTokenBtn');
-            if (saveTokenBtn) {
-                saveTokenBtn.addEventListener('click', saveAdminToken);
-            }
-            
-            const clearTokenBtn = document.getElementById('clearTokenBtn');
-            if (clearTokenBtn) {
-                clearTokenBtn.addEventListener('click', clearAdminToken);
-            }
-            
-            const loadCurrentConfigBtn = document.getElementById('loadCurrentConfigBtn');
-            if (loadCurrentConfigBtn) {
-                loadCurrentConfigBtn.addEventListener('click', loadCurrentConfig);
-            }
-            
-            const updateWebhookBtn = document.getElementById('updateWebhookBtn');
-            if (updateWebhookBtn) {
-                updateWebhookBtn.addEventListener('click', updateWebhookConfig);
-            }
-            
-            const updateRateLimiterBtn = document.getElementById('updateRateLimiterBtn');
-            if (updateRateLimiterBtn) {
-                updateRateLimiterBtn.addEventListener('click', updateRateLimiterConfig);
-            }
-            
-            const toggleTokenVisibility = document.getElementById('toggleTokenVisibility');
-            if (toggleTokenVisibility) {
-                toggleTokenVisibility.addEventListener('click', toggleTokenVisibilityHandler);
-            }
-            
             // Load saved token if available
             loadSavedToken();
             
@@ -2697,9 +3132,9 @@
             console.log('Loading active strategy indicator...');
             loadActiveStrategyIndicator();
             
-            // Initialize WebSocket connection
-            console.log('Starting WebSocket initialization...');
-            initWebSocket();
+            // WebSocket already initialized in DOMContentLoaded - no need to call again
+            console.log('WebSocket should already be initialized from DOMContentLoaded');
+            // initWebSocket(); // REMOVED - using initializeWebSocket() only
             
             // Set up auto-refresh interval for active strategy indicator
             setInterval(() => {
@@ -2862,148 +3297,17 @@
                     if (rateLimitingElement) rateLimitingElement.checked = !rlInfo.paused;
                 }
                 
-                showAlert('Configuration loaded successfully!', 'success');
+                // Load saved admin token from localStorage
+                const savedToken = localStorage.getItem('adminToken');
+                const adminTokenElement = document.getElementById('adminToken');
+                if (adminTokenElement && savedToken) {
+                    adminTokenElement.value = savedToken;
+                    console.log('Loaded saved admin token from localStorage');
+                }
                 
             } catch (error) {
                 console.error('Error loading current config:', error);
                 showAlert('Error loading current configurations', 'warning');
-            }
-        }
-        
-        // Update webhook configuration
-        async function updateWebhookConfig() {
-            try {
-                const token = getAdminToken();
-                if (!token) return;
-                
-                const webhookUrl = document.getElementById('webhookUrl')?.value;
-                const webhookTimeout = document.getElementById('webhookTimeout')?.value;
-                
-                if (!webhookUrl) {
-                    showAlert('Please enter a webhook URL', 'warning');
-                    return;
-                }
-                
-                // Use the system config endpoint that can handle both URL and timeout
-                const response = await fetch('/admin/system/config', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        token: token,
-                        webhook: {
-                            url: webhookUrl,
-                            timeout: parseInt(webhookTimeout) || 5
-                        }
-                    })
-                });
-                
-                if (response.ok) {
-                    showAlert('Webhook configuration updated successfully!', 'success');
-                } else {
-                    const errorData = await response.text();
-                    showAlert(`Error updating webhook: ${errorData}`, 'danger');
-                }
-                
-            } catch (error) {
-                console.error('Error updating webhook config:', error);
-                showAlert(`Error updating webhook: ${error.message}`, 'danger');
-            }
-        }
-        
-        // Update rate limiter configuration
-        async function updateRateLimiterConfig() {
-            try {
-                const token = getAdminToken();
-                if (!token) return;
-                
-                const maxReqPerMin = document.getElementById('maxReqPerMin')?.value;
-                const rateLimitingEnabled = document.getElementById('rateLimitingEnabled')?.checked;
-                
-                // Update max requests per minute if provided
-                if (maxReqPerMin) {
-                    const maxReqResponse = await fetch('/admin/webhook-rate-limiter/update', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            token: token,
-                            max_req_per_min: parseInt(maxReqPerMin)
-                        })
-                    });
-                    
-                    if (!maxReqResponse.ok) {
-                        const errorData = await maxReqResponse.text();
-                        showAlert(`Error updating max requests: ${errorData}`, 'danger');
-                        return;
-                    }
-                }
-                
-                // Update rate limiting enabled/disabled status
-                const enableEndpoint = rateLimitingEnabled ? '/admin/webhook-rate-limiter/resume' : '/admin/webhook-rate-limiter/pause';
-                const statusResponse = await fetch(enableEndpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ token: token })
-                });
-                
-                if (statusResponse.ok) {
-                    showAlert('Rate limiter configuration updated successfully!', 'success');
-                } else {
-                    const errorData = await statusResponse.text();
-                    showAlert(`Error updating rate limiter: ${errorData}`, 'danger');
-                }
-                
-            } catch (error) {
-                console.error('Error updating rate limiter config:', error);
-                showAlert(`Error updating rate limiter: ${error.message}`, 'danger');
-            }
-        }
-        
-        // Save admin token
-        function saveAdminToken() {
-            const tokenElement = document.getElementById('adminToken');
-            if (!tokenElement) return;
-            
-            const token = tokenElement.value.trim();
-            if (!token) {
-                showAlert('Please enter a token', 'warning');
-                return;
-            }
-            
-            localStorage.setItem('admin_token', token);
-            showAlert('Token saved successfully!', 'success');
-        }
-        
-        // Clear admin token
-        function clearAdminToken() {
-            if (!confirm('Clear saved admin token?')) return;
-            
-            localStorage.removeItem('admin_token');
-            const tokenElement = document.getElementById('adminToken');
-            if (tokenElement) {
-                tokenElement.value = '';
-            }
-            showAlert('Token cleared successfully!', 'info');
-        }
-        
-        // Toggle token visibility
-        function toggleTokenVisibilityHandler() {
-            const tokenElement = document.getElementById('adminToken');
-            const toggleBtn = document.getElementById('toggleTokenVisibility');
-            
-            if (!tokenElement || !toggleBtn) return;
-            
-            if (tokenElement.type === 'password') {
-                tokenElement.type = 'text';
-                toggleBtn.innerHTML = '<i class="bi bi-eye-slash"></i>';
-            } else {
-                tokenElement.type = 'password';
-                toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
             }
         }
         
@@ -3037,119 +3341,15 @@
         // WEBSOCKET HANDLERS (UPDATED)
         // ============================================================================
         
-        // Initialize WebSocket connection
-        function initWebSocket() {
-            console.log('Initializing WebSocket connection...');
-            
-            if (socket) {
-                console.log('Closing existing WebSocket connection');
-                socket.close();
-            }
-            
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/admin-updates`;
-            console.log('WebSocket URL:', wsUrl);
-            
-            socket = new WebSocket(wsUrl);
-            
-            socket.onopen = function(event) {
-                console.log('✅ WebSocket connection established successfully');
-                updateConnectionStatus('Connected', 'success');
-            };
-            
-            socket.onmessage = function(event) {
-                console.log('📨 WebSocket message received:', event.data);
-                try {
-                    const data = JSON.parse(event.data);
-                    handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('❌ Error parsing WebSocket message:', error, 'Raw data:', event.data);
-                }
-            };
-            
-            socket.onclose = function(event) {
-                console.log('🔌 WebSocket connection closed. Code:', event.code, 'Reason:', event.reason);
-                updateConnectionStatus('Disconnected', 'danger');
-                
-                // Attempt to reconnect after 5 seconds
-                console.log('⏰ Attempting to reconnect in 5 seconds...');
-                setTimeout(initWebSocket, 5000);
-            };
-            
-            socket.onerror = function(error) {
-                console.error('❌ WebSocket error:', error);
-                updateConnectionStatus('Error', 'danger');
-            };
-        }
+        // REMOVED: Duplicate initWebSocket() function - using initializeWebSocket() only
         
-        // Handle WebSocket messages for real-time updates
-        function handleWebSocketMessage(data) {
-            console.log('WebSocket message received:', data);
-            
-            // Handle system info updates
-            if (data.type === 'system_info') {
-                // Update metrics if available
-                if (data.data.metrics) {
-                    updateMetrics(data.data.metrics);
-                }
-                
-                // Update system status if available  
-                if (data.data.system_info) {
-                    updateSystemStatus(data.data.system_info);
-                    updateActiveStrategyIndicator(data.data.system_info.active_strategy);
-                }
-                
-                // Update charts with current data
-                updateChartsWithData();
-            }
-            
-            // Handle Finviz strategy changes
-            if (data.type === 'finviz_strategy_changed') {
-                const activeStrategy = data.data?.active_strategy;
-                updateActiveStrategyIndicator(activeStrategy);
-                
-                // Reload strategies list if modal is open
-                const strategiesTab = document.querySelector('#finviz-strategies');
-                if (strategiesTab && strategiesTab.classList.contains('active')) {
-                    loadFinvizStrategies();
-                }
-                
-                showAlert(`Finviz strategy changed to: ${activeStrategy?.name || 'Unknown'}`, 'info');
-            }
-            
-            // Handle admin action logged
-            if (data.type === 'admin_action_logged') {
-                // Reload log if we're on the first page
-                const logTab = document.querySelector('#admin-log');
-                if (logTab && logTab.classList.contains('active') && adminActionsCurrentPage === 1) {
-                    loadAdminActionsLog();
-                }
-                
-                // Show notification if action failed
-                if (data.data && !data.data.success) {
-                    showAlert(`Admin action failed: ${data.data.action_name}`, 'warning');
-                }
-            }
-        }
+        // Additional WebSocket message handlers that were in the duplicate function
+        // These are now handled by the main handleWebSocketMessage() function
         
-        // Update connection status indicator
-        function updateConnectionStatus(status, type) {
-            const connectionText = document.getElementById('connectionText');
-            const connectionIndicator = document.getElementById('connectionIndicator');
-            const connectionStatus = document.getElementById('connectionStatus');
-            
-            if (connectionText) connectionText.textContent = status;
-            
-            if (connectionIndicator) {
-                connectionIndicator.className = `status-indicator status-${type === 'success' ? 'online' : 'offline'}`;
-            }
-            
-            if (connectionStatus && status === 'Connected') {
-                connectionStatus.style.display = 'none';
-            } else if (connectionStatus && status !== 'Connected') {
-                connectionStatus.style.display = 'block';
-            }
-        }
+        // REMOVED: Duplicate updateConnectionStatus function - using main one only
+
+        // Add debug info to global scope for console access
+        window.showDebugInfo = showDebugInfo;
     </script>
 
     <!-- Configuration Modal with Tabs -->
@@ -3424,6 +3624,16 @@
                                     <h6 class="text-primary mb-3">
                                         <i class="bi bi-speedometer2"></i> Rate Limiter Configuration
                                     </h6>
+                                    
+                                    <div class="alert alert-info border-0 mb-3" style="background-color: #e3f2fd;">
+                                        <div class="d-flex align-items-center">
+                                            <i class="bi bi-info-circle-fill me-2" style="color: #1976d2;"></i>
+                                            <div>
+                                                <small><strong>Note:</strong> This setting is synchronized with the "Pause/Resume Rate Limiter" buttons in System Controls. Both methods control the same functionality.</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
                                     <div class="row mb-3">
                                         <div class="col-md-6">
                                             <label for="maxReqPerMin" class="form-label">Max Requests per Minute</label>

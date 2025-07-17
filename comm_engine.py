@@ -215,6 +215,10 @@ class CommunicationEngine:
         """Broadcast sell all list update - INSTANT like metrics."""
         await self.broadcast("sell_all_list_update", data)
 
+    async def broadcast_order_status_change(self, data: Dict[str, Any]):
+        """Broadcast order/position status change - INSTANT like metrics."""
+        await self.broadcast("order_status_change", data)
+
     async def broadcast_new_audit_entry(self, data: Dict[str, Any]):
         """Broadcast new audit entry - INSTANT like metrics."""
         # Here we also update the cache
@@ -321,6 +325,36 @@ class CommunicationEngine:
     async def trigger_audit_update(self, audit_events: List[Dict[str, Any]]):
         """Trigger audit update broadcast for admin interface."""
         await self.broadcast("audit_update", audit_events)
+
+    # === ENHANCED BROADCAST METHODS WITH RETRY ===
+
+    async def broadcast_with_retry(self, event_type: str, data: Any, max_retries: int = 2) -> tuple[int, int]:
+        """Broadcast with retry logic for failed connections."""
+        total_successful = 0
+        total_failed = 0
+        
+        for attempt in range(max_retries + 1):
+            successful, failed = await self.broadcast(event_type, data)
+            total_successful += successful
+            total_failed += failed
+            
+            if failed == 0:  # All successful
+                break
+                
+            if attempt < max_retries:
+                _logger.warning(f"Broadcast attempt {attempt + 1} had {failed} failures, retrying...")
+                await asyncio.sleep(0.5)  # Brief delay before retry
+        
+        return total_successful, total_failed
+
+    async def trigger_metrics_update_with_retry(self, metrics: Dict[str, Any]):
+        """Trigger metrics update with retry logic."""
+        successful, failed = await self.broadcast_with_retry("metrics_update", metrics)
+        
+        if failed > 0:
+            _logger.warning(f"Metrics broadcast completed with {failed} failures and {successful} successes")
+        else:
+            _logger.debug(f"Metrics broadcast successful to {successful} clients")
 
     def get_connected_clients(self) -> List[Any]:
         """Get list of connected WebSocket clients."""

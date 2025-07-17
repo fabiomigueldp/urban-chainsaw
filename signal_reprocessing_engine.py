@@ -26,6 +26,9 @@ class ReprocessingStatus(Enum):
     FAILED_DATABASE = "failed_database"
     FAILED_QUEUE = "failed_queue"
     SKIPPED_NON_BUY = "skipped_non_buy"
+    SKIPPED_POSITION_EXISTS = "skipped_position_exists"
+    SKIPPED_SELL_CHRONOLOGY = "skipped_sell_chronology"
+    SKIPPED_STATUS_CHANGED = "skipped_status_changed"
 
 
 @dataclass
@@ -247,16 +250,30 @@ class SignalReconstructor:
     async def _create_minimal_signal(self, signal_data: Dict[str, Any]) -> Optional[SignalPydanticModel]:
         """Create minimal valid signal as last resort."""
         try:
-            # Absolute minimal signal
+            # Try to preserve original timestamp if available
+            original_time = None
+            if signal_data.get("created_at"):
+                original_time = signal_data["created_at"].isoformat()
+            elif signal_data.get("original_signal") and isinstance(signal_data["original_signal"], dict):
+                original_time = signal_data["original_signal"].get("time")
+            
+            # Create minimal signal with best effort data preservation
             signal_dict = {
                 "signal_id": signal_data["signal_id"],
                 "ticker": signal_data["ticker"],
                 "side": "buy",  # Default for reprocessing
-                "time": datetime.utcnow().isoformat()
+                "time": original_time or datetime.utcnow().isoformat()
             }
             
+            # Try to preserve price if available
+            if signal_data.get("price"):
+                signal_dict["price"] = signal_data["price"]
+            elif signal_data.get("original_signal") and isinstance(signal_data["original_signal"], dict):
+                if price := signal_data["original_signal"].get("price"):
+                    signal_dict["price"] = price
+            
             signal = SignalPydanticModel(**signal_dict)
-            _logger.info(f"Created minimal signal for {signal_data['signal_id']} as fallback")
+            _logger.warning(f"Created minimal signal for {signal_data['signal_id']} as fallback - data fidelity may be reduced")
             return signal
             
         except Exception as e:
@@ -285,7 +302,7 @@ class SignalReprocessingEngine:
         self.metrics = ReprocessingMetrics()
         
         # Configuration
-        self.max_signals_per_ticker = 100
+        self.max_signals_per_ticker = 50  # Reasonable limit to prevent DoS
         self.processing_timeout_ms = 30000  # 30 seconds
         
     async def process_new_tickers(self, new_tickers: Set[str], window_seconds: int) -> ReprocessingResult:
@@ -356,14 +373,16 @@ class SignalReprocessingEngine:
         
         # Get rejected signals for this ticker
         try:
-            rejected_signals = await self.db_manager.get_rejected_signals_for_reprocessing(ticker, window_seconds)
+            rejected_signals = await self.db_manager.get_rejected_signals_for_reprocessing(
+                ticker, window_seconds, limit=self.max_signals_per_ticker
+            )
             self.metrics.signals_found += len(rejected_signals)
             
             if not rejected_signals:
                 _logger.debug(f"[ReprocessingEngine:{ticker}] No rejected signals found")
                 return
             
-            _logger.info(f"[ReprocessingEngine:{ticker}] Found {len(rejected_signals)} candidate signals")
+            _logger.info(f"[ReprocessingEngine:{ticker}] Found {len(rejected_signals)} candidate signals (max {self.max_signals_per_ticker})")
             
         except Exception as e:
             _logger.error(f"[ReprocessingEngine:{ticker}] Database error retrieving signals: {e}")
@@ -429,7 +448,7 @@ class SignalReprocessingEngine:
                             return SignalReprocessingOutcome(
                                 signal_id=signal_id,
                                 ticker=ticker,
-                                status=ReprocessingStatus.SKIPPED_NON_BUY,
+                                status=ReprocessingStatus.SKIPPED_SELL_CHRONOLOGY,
                                 success=False,
                                 error_message="BUY signal obsoleted by subsequent SELL signal"
                             )
@@ -444,38 +463,23 @@ class SignalReprocessingEngine:
                 
         except Exception as e:
             _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Error checking sell chronology (continuing): {e}")
-        
-        # Step 3: Re-approve in database
+
+        # Step 2.6: Check if position already exists (CRITICAL FIX)
         try:
-            reapproved = await self.db_manager.reapprove_signal(
-                signal_id, 
-                f"Signal re-approved via reprocessing engine - ticker {ticker} entered Top-N list"
-            )
-            if not reapproved:
-                error_msg = "Failed to re-approve signal in database"
-                _logger.error(f"[ReprocessingEngine:{ticker}:{signal_id}] {error_msg}")
+            existing_position = await self.db_manager.is_position_open_or_closing(ticker)
+            if existing_position:
+                _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Skipping BUY reprocessing - position already exists (OPEN or CLOSING)")
                 return SignalReprocessingOutcome(
                     signal_id=signal_id,
                     ticker=ticker,
-                    status=ReprocessingStatus.FAILED_DATABASE,
+                    status=ReprocessingStatus.SKIPPED_POSITION_EXISTS,
                     success=False,
-                    error_message=error_msg
+                    error_message="Position already exists for ticker"
                 )
-            
-            _logger.debug(f"[ReprocessingEngine:{ticker}:{signal_id}] Database re-approval: SUCCESS")
-            
         except Exception as e:
-            error_msg = f"Database error during re-approval: {str(e)}"
-            _logger.error(f"[ReprocessingEngine:{ticker}:{signal_id}] {error_msg}")
-            return SignalReprocessingOutcome(
-                signal_id=signal_id,
-                ticker=ticker,
-                status=ReprocessingStatus.FAILED_DATABASE,
-                success=False,
-                error_message=error_msg
-            )
-        
-        # Step 4: Reconstruct Signal object
+            _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Error checking existing position (continuing): {e}")
+
+        # Step 3: Reconstruct Signal object BEFORE database operations
         try:
             reconstructed_signal = await self.reconstructor.reconstruct_signal(signal_data)
             if not reconstructed_signal:
@@ -501,22 +505,60 @@ class SignalReprocessingEngine:
                 success=False,
                 error_message=error_msg
             )
-        
-        # Step 5: Open position (for BUY signals)
+
+        # Step 4: ATOMIC TRANSACTION - Re-approve signal, open position, add to queue
         try:
-            await self.db_manager.open_position(ticker=ticker, entry_signal_id=signal_id)
-            _logger.debug(f"[ReprocessingEngine:{ticker}:{signal_id}] Position opened")
-            
-            # Update sell_all list
-            from main import get_sell_all_list_data, comm_engine
-            sell_all_data = await get_sell_all_list_data()
-            await comm_engine.trigger_sell_all_list_update(sell_all_data)
-            
+            async with self.db_manager.get_transaction() as session:
+                # Re-approve signal with optimistic locking validation
+                success, error_msg = await self.db_manager.reapprove_signal_with_validation(
+                    signal_id, 
+                    f"Signal re-approved via reprocessing engine - ticker {ticker} entered Top-N list"
+                )
+                if not success:
+                    _logger.error(f"[ReprocessingEngine:{ticker}:{signal_id}] {error_msg}")
+                    # Determine if this was a status change issue
+                    status = ReprocessingStatus.SKIPPED_STATUS_CHANGED if "status changed" in error_msg else ReprocessingStatus.FAILED_DATABASE
+                    return SignalReprocessingOutcome(
+                        signal_id=signal_id,
+                        ticker=ticker,
+                        status=status,
+                        success=False,
+                        error_message=error_msg
+                    )
+
+                # Double-check position doesn't exist in same transaction 
+                existing_position = await self.db_manager.is_position_open_or_closing(ticker)
+                if existing_position:
+                    await session.rollback()
+                    _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Position created during transaction - aborting")
+                    return SignalReprocessingOutcome(
+                        signal_id=signal_id,
+                        ticker=ticker,
+                        status=ReprocessingStatus.SKIPPED_POSITION_EXISTS,
+                        success=False,
+                        error_message="Concurrent position creation detected"
+                    )
+
+                # Open position
+                await self.db_manager.open_position_tx(ticker, signal_id, session)
+                
+                # Commit transaction first
+                await session.commit()
+                
+                _logger.debug(f"[ReprocessingEngine:{ticker}:{signal_id}] Database transaction completed successfully")
+                
         except Exception as e:
-            # Don't fail the entire reprocessing for position errors
-            _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Position management warning: {e}")
-        
-        # Step 6: Add to forwarding queue
+            error_msg = f"Error during atomic reprocessing transaction: {str(e)}"
+            _logger.error(f"[ReprocessingEngine:{ticker}:{signal_id}] {error_msg}")
+            return SignalReprocessingOutcome(
+                signal_id=signal_id,
+                ticker=ticker,
+                status=ReprocessingStatus.FAILED_DATABASE,
+                success=False,
+                error_message=error_msg
+            )
+
+        # Step 5: Add to forwarding queue (after successful DB transaction)
         try:
             approved_signal_data = {
                 'signal': reconstructed_signal,
@@ -530,8 +572,11 @@ class SignalReprocessingEngine:
             _logger.info(f"[ReprocessingEngine:{ticker}:{signal_id}] Added to forwarding queue: SUCCESS")
             
         except Exception as e:
-            error_msg = f"Error adding to forwarding queue: {str(e)}"
+            # Queue failure after successful DB transaction - this is a problem
+            error_msg = f"CRITICAL: DB transaction succeeded but queue failed: {str(e)}"
             _logger.error(f"[ReprocessingEngine:{ticker}:{signal_id}] {error_msg}")
+            # We could try to rollback the position here, but that would be complex
+            # For now, just log the error - the position exists but signal won't be forwarded
             return SignalReprocessingOutcome(
                 signal_id=signal_id,
                 ticker=ticker,
@@ -540,6 +585,15 @@ class SignalReprocessingEngine:
                 error_message=error_msg
             )
         
+        # Step 6: Update sell_all list (non-critical, outside transaction)
+        try:
+            from main import get_sell_all_list_data, comm_engine
+            sell_all_data = await get_sell_all_list_data()
+            await comm_engine.trigger_sell_all_list_update(sell_all_data)
+        except Exception as e:
+            # Don't fail the entire reprocessing for this
+            _logger.warning(f"[ReprocessingEngine:{ticker}:{signal_id}] Sell all list update warning: {e}")
+
         # Success!
         _logger.info(f"[ReprocessingEngine:{ticker}:{signal_id}] Reprocessing completed successfully")
         return SignalReprocessingOutcome(
@@ -557,7 +611,12 @@ class SignalReprocessingEngine:
         if outcome.success:
             self.metrics.signals_successful += 1
         else:
-            if outcome.status == ReprocessingStatus.SKIPPED_NON_BUY:
+            if outcome.status in [
+                ReprocessingStatus.SKIPPED_NON_BUY, 
+                ReprocessingStatus.SKIPPED_POSITION_EXISTS,
+                ReprocessingStatus.SKIPPED_SELL_CHRONOLOGY,
+                ReprocessingStatus.SKIPPED_STATUS_CHANGED
+            ]:
                 self.metrics.signals_skipped += 1
             else:
                 self.metrics.signals_failed += 1
@@ -588,24 +647,57 @@ class SignalReprocessingEngine:
             return {
                 "status": "UNKNOWN",
                 "message": "No reprocessing cycles completed yet",
-                "last_run": None
+                "last_run": None,
+                "metrics": {
+                    "signals_processed": 0,
+                    "success_rate": 0.0,
+                    "error_rates": {}
+                }
             }
         
         success_rate = self.metrics.get_success_rate()
         
-        if success_rate >= 95.0:
+        # Calculate error rates
+        total_processed = self.metrics.signals_processed
+        error_rates = {}
+        if total_processed > 0:
+            error_rates = {
+                "validation_failures": (self.metrics.validation_failures / total_processed) * 100,
+                "reconstruction_failures": (self.metrics.reconstruction_failures / total_processed) * 100,
+                "database_errors": (self.metrics.database_errors / total_processed) * 100,
+                "queue_errors": (self.metrics.queue_errors / total_processed) * 100
+            }
+        
+        # Determine overall health status
+        if success_rate >= 95.0 and self.metrics.last_run_duration_ms < 10000:  # < 10s
             status = "HEALTHY"
-        elif success_rate >= 85.0:
+        elif success_rate >= 85.0 and self.metrics.last_run_duration_ms < 30000:  # < 30s
             status = "WARNING"
         else:
             status = "CRITICAL"
+        
+        # Check if last run was too long ago (more than 1 hour)
+        time_since_last_run = datetime.utcnow() - self.metrics.last_run_timestamp
+        if time_since_last_run.total_seconds() > 3600:
+            status = "STALE"
         
         return {
             "status": status,
             "success_rate": success_rate,
             "last_run": self.metrics.last_run_timestamp.isoformat(),
             "last_duration_ms": self.metrics.last_run_duration_ms,
-            "signals_processed": self.metrics.signals_processed,
-            "signals_successful": self.metrics.signals_successful,
-            "signals_failed": self.metrics.signals_failed
+            "time_since_last_run_minutes": time_since_last_run.total_seconds() / 60,
+            "metrics": {
+                "signals_found": self.metrics.signals_found,
+                "signals_processed": self.metrics.signals_processed,
+                "signals_successful": self.metrics.signals_successful,
+                "signals_failed": self.metrics.signals_failed,
+                "signals_skipped": self.metrics.signals_skipped,
+                "tickers_processed": len(self.metrics.tickers_processed),
+                "error_rates": error_rates
+            },
+            "configuration": {
+                "max_signals_per_ticker": self.max_signals_per_ticker,
+                "processing_timeout_ms": self.processing_timeout_ms
+            }
         }

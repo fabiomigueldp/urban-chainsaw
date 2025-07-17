@@ -16,10 +16,11 @@ from config import (
     get_finviz_tickers_per_page,
     get_max_req_per_min,
     get_max_concurrency,
-    DEFAULT_TICKER_REFRESH_SEC,
-    FINVIZ_CONFIG_FILE
+    DEFAULT_TICKER_REFRESH_SEC
+    # FINVIZ_CONFIG_FILE removed - system now uses database-only configuration
 )
-from finviz import parse_tickers_from_html, load_finviz_config, persist_finviz_config_from_dict, normalise_url
+from finviz import parse_tickers_from_html, normalise_url
+# Removed load_finviz_config, persist_finviz_config_from_dict - database-only configuration
 # Placeholder for prometheus_client if you integrate it
 # from prometheus_client import Counter, Gauge, Histogram
 
@@ -1101,17 +1102,18 @@ async def mock_admin_ws_broadcaster(event_type: str, data: Any):
     print(f"[Mock WS Broadcast] Event: {event_type}, Data: {data}")
 
 async def main_test():
-    # Create a dummy finviz_config.json for testing
+    # Create a dummy finviz_config.json for testing (DEPRECATED - database-only mode)
     initial_config_for_file = {
         "finviz_url": "https://finviz.com/screener.ashx?v=111", # Basic URL
         "top_n": 25, # Test with a small number requiring 2 pages
         "refresh_interval_sec": 15 # Test refresh
     }
-    persist_finviz_config_from_dict(initial_config_for_file)
+    # persist_finviz_config_from_dict(initial_config_for_file)  # DISABLED - database-only mode
+    # NOTE: Tests should use database setup instead of JSON file
 
 
     shared_state_test = {}
-    engine = FinvizEngine(shared_state_test, mock_admin_ws_broadcaster)
+    engine = FinvizEngine(shared_state_test, mock_admin_ws_broadcaster, None)  # TODO: Add db_manager mock
 
     # Start the engine in the background
     engine_task = asyncio.create_task(engine.run())

@@ -84,6 +84,23 @@ class DBManager:
         finally:
             await session.close()
 
+    @asynccontextmanager  
+    async def get_transaction(self) -> AsyncGenerator[AsyncSession, None]:
+        """Provides a database session for manual transaction control.
+        Caller is responsible for commit/rollback."""
+        if not self._initialized:
+            raise RuntimeError("DatabaseManager not initialized. Call initialize() first.")
+
+        session: AsyncSession = self.async_session_factory()
+        try:
+            yield session
+        except Exception as e:
+            await session.rollback()
+            _logger.error(f"Database transaction error, transaction rolled back: {e}", exc_info=True)
+            raise
+        finally:
+            await session.close()
+
     # --- Business Logic Methods (Manager Public API) ---
     
     async def create_signal_with_initial_event(self, signal_payload: SignalPayload, signal_type: SignalTypeEnum = SignalTypeEnum.BUY) -> str:
@@ -228,7 +245,8 @@ class DBManager:
         try:
             async with self.get_session() as session:
                 # Calculate time interval - use timezone-aware datetime
-                end_time = datetime.utcnow()
+                from datetime import timezone
+                end_time = datetime.now(timezone.utc)
                 start_time = end_time - timedelta(hours=hours)
                 
                 _logger.info(f"Getting hourly stats from {start_time} to {end_time} ({hours} hours)")
@@ -257,12 +275,24 @@ class DBManager:
                 
                 _logger.info(f"Found data for {len(data_by_hour)} hours in database")
                 
+                # Debug: Log the actual keys from database
+                for key in data_by_hour.keys():
+                    _logger.info(f"Database hour key: {key} (type: {type(key)})")
+                
                 hourly_data = []
                 
                 # Fill ALL hours in the interval, even if they have no data
                 for i in range(hours):
                     hour_time = end_time - timedelta(hours=hours-1-i)
                     hour_key = hour_time.replace(minute=0, second=0, microsecond=0)
+                    
+                    # Convert hour_key to match database format (timezone-aware)
+                    from datetime import timezone
+                    if hour_key.tzinfo is None:
+                        hour_key = hour_key.replace(tzinfo=timezone.utc)
+                    
+                    # Debug: Log the hour_key being checked
+                    _logger.info(f"Checking hour_key: {hour_key} (type: {type(hour_key)}) - found: {hour_key in data_by_hour}")
                     
                     if hour_key in data_by_hour:
                         row = data_by_hour[hour_key]
@@ -305,7 +335,8 @@ class DBManager:
             
             # Return fallback data in case of error
             hourly_data = []
-            end_time = datetime.utcnow()
+            from datetime import timezone
+            end_time = datetime.now(timezone.utc)
             for i in range(hours):
                 hour_time = end_time - timedelta(hours=hours-1-i)
                 hourly_data.append({
@@ -462,7 +493,7 @@ class DBManager:
         response = await self.query_signals(query_params)
         return response.entries
 
-    async def get_rejected_signals_for_reprocessing(self, ticker: str, window_seconds: int) -> List[Dict[str, Any]]:
+    async def get_rejected_signals_for_reprocessing(self, ticker: str, window_seconds: int, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Retrieves signals for a specific ticker that were rejected within a given time window.
         If window_seconds is 0, it retrieves all rejected signals for the ticker (infinite window).
@@ -487,6 +518,10 @@ class DBManager:
             # Add ordering
             stmt = stmt.order_by(desc(Signal.created_at)) # Process newer ones first if multiple
 
+            # Add limit if specified
+            if limit and limit > 0:
+                stmt = stmt.limit(limit)
+
             result = await session.execute(stmt)
             signals = result.scalars().all()
 
@@ -509,9 +544,12 @@ class DBManager:
 
             log_msg = f"Found {len(signal_list)} rejected signals for ticker {ticker}"
             if window_seconds > 0:
-                log_msg += f" within {window_seconds}s for reprocessing."
+                log_msg += f" within {window_seconds}s"
             else:
-                log_msg += " (infinite window) for reprocessing."
+                log_msg += " (infinite window)"
+            if limit:
+                log_msg += f" (limited to {limit})"
+            log_msg += " for reprocessing."
             _logger.debug(log_msg)
             
             return signal_list
@@ -545,6 +583,70 @@ class DBManager:
             await session.flush() # Persist changes
             _logger.info(f"Signal {signal_id} re-approved. Status: {db_signal.status}. Event logged.")
             return True
+
+    async def reapprove_signal_tx(self, signal_id: str, details: str, session: AsyncSession) -> bool:
+        """
+        Changes a signal's status to APPROVED and logs a reprocessing event.
+        Transactional version that uses provided session without auto-commit.
+        """
+        # Find the signal
+        result = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
+        db_signal = result.scalar_one_or_none()
+
+        if not db_signal:
+            _logger.warning(f"Signal {signal_id} not found for re-approval.")
+            return False
+
+        # Update signal status
+        db_signal.status = SignalStatusEnum.APPROVED.value # Enum -> string for DB
+        db_signal.updated_at = datetime.utcnow()
+
+        # Log reprocessing event
+        reprocessing_event = SignalEvent(
+            signal_id=signal_id,
+            status=SignalStatusEnum.APPROVED.value, # Log event as approved
+            details=details or "Signal re-approved via reprocessing mechanism.",
+            worker_id="reprocessing_engine" # Identify the source of this event
+        )
+        session.add(reprocessing_event)
+
+        await session.flush() # Persist changes
+        _logger.info(f"Signal {signal_id} re-approved. Status: {db_signal.status}. Event logged.")
+        return True
+
+    async def reapprove_signal_with_validation(self, signal_id: str, details: str, expected_status: str = SignalStatusEnum.REJECTED.value) -> tuple[bool, str]:
+        """
+        Changes a signal's status to APPROVED with optimistic locking validation.
+        Returns (success, error_message).
+        """
+        async with self.get_session() as session:
+            # Find the signal
+            result = await session.execute(select(Signal).where(Signal.signal_id == signal_id))
+            db_signal = result.scalar_one_or_none()
+
+            if not db_signal:
+                return False, f"Signal {signal_id} not found for re-approval."
+
+            # Optimistic locking check - verify signal is still in expected status
+            if db_signal.status != expected_status:
+                return False, f"Signal {signal_id} status changed from {expected_status} to {db_signal.status}. Skipping reprocessing."
+
+            # Update signal status
+            db_signal.status = SignalStatusEnum.APPROVED.value
+            db_signal.updated_at = datetime.utcnow()
+
+            # Log reprocessing event
+            reprocessing_event = SignalEvent(
+                signal_id=signal_id,
+                status=SignalStatusEnum.APPROVED.value,
+                details=details or "Signal re-approved via reprocessing mechanism.",
+                worker_id="reprocessing_engine"
+            )
+            session.add(reprocessing_event)
+
+            await session.flush()
+            _logger.info(f"Signal {signal_id} re-approved. Status: {db_signal.status}. Event logged.")
+            return True, ""
 
     async def has_subsequent_sell_signal(self, ticker: str, buy_signal_timestamp: datetime, window_seconds: int = 300) -> bool:
         """
@@ -1136,6 +1238,18 @@ class DBManager:
             await session.flush()
             _logger.info(f"Position opened for {ticker} linked to signal {entry_signal_id}.")
 
+    async def open_position_tx(self, ticker: str, entry_signal_id: str, session: AsyncSession):
+        """Creates a new record for an open position.
+        Transactional version that uses provided session without auto-commit."""
+        new_position = Position(
+            ticker=ticker.upper(),
+            entry_signal_id=entry_signal_id,
+            status=PositionStatusEnum.OPEN.value
+        )
+        session.add(new_position)
+        await session.flush()
+        _logger.info(f"Position opened for {ticker} linked to signal {entry_signal_id}.")
+
     async def mark_position_as_closing(self, ticker: str, exit_signal_id: str) -> bool:
         """Finds the latest open position for a ticker and marks it as 'closing'."""
         async with self.get_session() as session:
@@ -1178,6 +1292,21 @@ class DBManager:
             stmt = select(func.count(Position.id)).where(
                 Position.ticker == ticker.upper(),
                 Position.status == PositionStatusEnum.OPEN.value
+            )
+            result = await session.execute(stmt)
+            count = result.scalar_one()
+            return count > 0
+
+    async def is_position_open_or_closing(self, ticker: str) -> bool:
+        """Checks if there is at least one 'open' or 'closing' position for a given ticker.
+        This is important for reprocessing to avoid opening multiple positions."""
+        async with self.get_session() as session:
+            stmt = select(func.count(Position.id)).where(
+                Position.ticker == ticker.upper(),
+                Position.status.in_([
+                    PositionStatusEnum.OPEN.value,
+                    PositionStatusEnum.CLOSING.value
+                ])
             )
             result = await session.execute(stmt)
             count = result.scalar_one()
@@ -1227,14 +1356,14 @@ class DBManager:
     async def get_positions_with_details(self, status_filter=None, ticker_filter=None):
         """Retorna posições com detalhes completos para interface de ordens."""
         async with self.get_session() as session:
+            # Simplify query - remove complex SQL duration calculation
             query = select(
                 Position.id,
                 Position.ticker,
                 Position.status,
                 Position.opened_at,
                 Position.closed_at,
-                Signal.price.label('entry_price'),
-                func.extract('epoch', Position.closed_at - Position.opened_at).label('duration_seconds')
+                Signal.price.label('entry_price')
             ).join(
                 Signal, Position.entry_signal_id == Signal.signal_id
             )
@@ -1249,11 +1378,39 @@ class DBManager:
             
             orders = []
             for row in result:
+                # Calculate duration properly
+                duration_seconds = 0
                 duration_str = "—"
-                if row.duration_seconds:
-                    hours = int(row.duration_seconds // 3600)
-                    minutes = int((row.duration_seconds % 3600) // 60)
-                    duration_str = f"{hours}h {minutes}m"
+                
+                if row.opened_at:
+                    if row.closed_at:
+                        # Position is closed - use actual close time
+                        duration_delta = row.closed_at - row.opened_at
+                        duration_seconds = duration_delta.total_seconds()
+                    else:
+                        # Position is open - calculate from now
+                        try:
+                            # Handle timezone-aware datetime properly
+                            now = datetime.utcnow()
+                            if hasattr(row.opened_at, 'tzinfo') and row.opened_at.tzinfo is not None:
+                                # If opened_at has timezone info, make now timezone-aware
+                                from datetime import timezone
+                                now = now.replace(tzinfo=timezone.utc)
+                            elif hasattr(row.opened_at, 'replace'):
+                                # If opened_at is naive, ensure both are naive
+                                now = now.replace(tzinfo=None)
+                            
+                            duration_delta = now - row.opened_at
+                            duration_seconds = duration_delta.total_seconds()
+                        except Exception as e:
+                            _logger.warning(f"Error calculating duration for open position {row.id}: {e}")
+                            duration_seconds = 0
+                    
+                    # Format duration string
+                    if duration_seconds > 0:
+                        hours = int(duration_seconds // 3600)
+                        minutes = int((duration_seconds % 3600) // 60)
+                        duration_str = f"{hours}h {minutes}m"
                 
                 orders.append({
                     "id": row.id,
@@ -1262,8 +1419,10 @@ class DBManager:
                     "opened_at": row.opened_at.isoformat() if row.opened_at else None,
                     "closed_at": row.closed_at.isoformat() if row.closed_at else None,
                     "entry_price": float(row.entry_price) if row.entry_price else 0.0,
+                    "exit_price": None,  # TODO: Add exit price logic if needed
+                    "value": None,  # TODO: Add value calculation if needed
                     "duration": duration_str,
-                    "duration_seconds": row.duration_seconds or 0
+                    "duration_seconds": duration_seconds
                 })
             
             return orders

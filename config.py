@@ -234,7 +234,8 @@ settings = Settings()
 
 # Export individual config values for direct import (for legacy or convenience)
 FINVIZ_UPDATE_TOKEN = settings.FINVIZ_UPDATE_TOKEN
-FINVIZ_CONFIG_FILE = settings.FINVIZ_CONFIG_FILE
+# FINVIZ_CONFIG_FILE removed - system now uses database-only configuration
+FINVIZ_CONFIG_FILE = "finviz_config.json"  # Legacy compatibility - not used in database-only mode
 DEFAULT_TICKER_REFRESH_SEC = settings.DEFAULT_TICKER_REFRESH_SEC
 QUEUE_MAX_SIZE = settings.QUEUE_MAX_SIZE
 SERVER_PORT = settings.SERVER_PORT
