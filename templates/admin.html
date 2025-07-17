@@ -2655,6 +2655,37 @@
                 setTokenBtn.addEventListener('click', setAdminToken);
             }
             
+            // Bind System Settings buttons
+            const saveTokenBtn = document.getElementById('saveTokenBtn');
+            if (saveTokenBtn) {
+                saveTokenBtn.addEventListener('click', saveAdminToken);
+            }
+            
+            const clearTokenBtn = document.getElementById('clearTokenBtn');
+            if (clearTokenBtn) {
+                clearTokenBtn.addEventListener('click', clearAdminToken);
+            }
+            
+            const loadCurrentConfigBtn = document.getElementById('loadCurrentConfigBtn');
+            if (loadCurrentConfigBtn) {
+                loadCurrentConfigBtn.addEventListener('click', loadCurrentConfig);
+            }
+            
+            const updateWebhookBtn = document.getElementById('updateWebhookBtn');
+            if (updateWebhookBtn) {
+                updateWebhookBtn.addEventListener('click', updateWebhookConfig);
+            }
+            
+            const updateRateLimiterBtn = document.getElementById('updateRateLimiterBtn');
+            if (updateRateLimiterBtn) {
+                updateRateLimiterBtn.addEventListener('click', updateRateLimiterConfig);
+            }
+            
+            const toggleTokenVisibility = document.getElementById('toggleTokenVisibility');
+            if (toggleTokenVisibility) {
+                toggleTokenVisibility.addEventListener('click', toggleTokenVisibilityHandler);
+            }
+            
             // Load saved token if available
             loadSavedToken();
             
@@ -2831,9 +2862,145 @@
                     if (rateLimitingElement) rateLimitingElement.checked = !rlInfo.paused;
                 }
                 
+                showAlert('Configuration loaded successfully!', 'success');
+                
             } catch (error) {
                 console.error('Error loading current config:', error);
                 showAlert('Error loading current configurations', 'warning');
+            }
+        }
+        
+        // Update webhook configuration
+        async function updateWebhookConfig() {
+            try {
+                const token = getAdminToken();
+                if (!token) return;
+                
+                const webhookUrl = document.getElementById('webhookUrl')?.value;
+                const webhookTimeout = document.getElementById('webhookTimeout')?.value;
+                
+                if (!webhookUrl) {
+                    showAlert('Please enter a webhook URL', 'warning');
+                    return;
+                }
+                
+                const response = await fetch('/admin/webhook/update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        token: token,
+                        webhook_url: webhookUrl,
+                        timeout: parseInt(webhookTimeout) || 5
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert('Webhook configuration updated successfully!', 'success');
+                } else {
+                    const errorData = await response.text();
+                    showAlert(`Error updating webhook: ${errorData}`, 'danger');
+                }
+                
+            } catch (error) {
+                console.error('Error updating webhook config:', error);
+                showAlert(`Error updating webhook: ${error.message}`, 'danger');
+            }
+        }
+        
+        // Update rate limiter configuration
+        async function updateRateLimiterConfig() {
+            try {
+                const token = getAdminToken();
+                if (!token) return;
+                
+                const maxReqPerMin = document.getElementById('maxReqPerMin')?.value;
+                const rateLimitingEnabled = document.getElementById('rateLimitingEnabled')?.checked;
+                
+                // Update max requests per minute if provided
+                if (maxReqPerMin) {
+                    const maxReqResponse = await fetch('/admin/webhook-rate-limiter/update-max-req', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            token: token,
+                            max_req_per_min: parseInt(maxReqPerMin)
+                        })
+                    });
+                    
+                    if (!maxReqResponse.ok) {
+                        const errorData = await maxReqResponse.text();
+                        showAlert(`Error updating max requests: ${errorData}`, 'danger');
+                        return;
+                    }
+                }
+                
+                // Update rate limiting enabled/disabled status
+                const enableEndpoint = rateLimitingEnabled ? '/admin/webhook-rate-limiter/resume' : '/admin/webhook-rate-limiter/pause';
+                const statusResponse = await fetch(enableEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ token: token })
+                });
+                
+                if (statusResponse.ok) {
+                    showAlert('Rate limiter configuration updated successfully!', 'success');
+                } else {
+                    const errorData = await statusResponse.text();
+                    showAlert(`Error updating rate limiter: ${errorData}`, 'danger');
+                }
+                
+            } catch (error) {
+                console.error('Error updating rate limiter config:', error);
+                showAlert(`Error updating rate limiter: ${error.message}`, 'danger');
+            }
+        }
+        
+        // Save admin token
+        function saveAdminToken() {
+            const tokenElement = document.getElementById('adminToken');
+            if (!tokenElement) return;
+            
+            const token = tokenElement.value.trim();
+            if (!token) {
+                showAlert('Please enter a token', 'warning');
+                return;
+            }
+            
+            localStorage.setItem('admin_token', token);
+            showAlert('Token saved successfully!', 'success');
+        }
+        
+        // Clear admin token
+        function clearAdminToken() {
+            if (!confirm('Clear saved admin token?')) return;
+            
+            localStorage.removeItem('admin_token');
+            const tokenElement = document.getElementById('adminToken');
+            if (tokenElement) {
+                tokenElement.value = '';
+            }
+            showAlert('Token cleared successfully!', 'info');
+        }
+        
+        // Toggle token visibility
+        function toggleTokenVisibilityHandler() {
+            const tokenElement = document.getElementById('adminToken');
+            const toggleBtn = document.getElementById('toggleTokenVisibility');
+            
+            if (!tokenElement || !toggleBtn) return;
+            
+            if (tokenElement.type === 'password') {
+                tokenElement.type = 'text';
+                toggleBtn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+            } else {
+                tokenElement.type = 'password';
+                toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
             }
         }
         

@@ -95,16 +95,10 @@ class Settings(BaseSettings):
         20,
         description="Maximum number of concurrent requests to Finviz."
     )
-    # Default refresh interval, can be overridden by finviz_config.json or /finviz/config endpoint
+    # Default refresh interval, can be overridden by active strategy configuration
     DEFAULT_TICKER_REFRESH_SEC: int = Field(
         10,
         description="Default refresh interval for tickers."
-    )
-
-    # --- Finviz settings file ---
-    FINVIZ_CONFIG_FILE: str = Field(
-        "finviz_config.json",
-        description="Path to the Finviz configuration file."
     )
 
     # --- Prometheus Metrics ---
