@@ -67,38 +67,19 @@ from database.simple_models import SignalStatusEnum, SignalLocationEnum
 # ---------------------------------------------------------------------------- #
 
 def get_current_metrics() -> Dict[str, Any]:
-    """Get current metrics with database as source of truth."""
-    try:
-        # Always get fresh data from database for persistent metrics
-        db_analytics = asyncio.run(db_manager.get_system_analytics())
-        
-        # Get real-time queue sizes from memory
-        processing_queue_size = queue.qsize() if queue else 0
-        approved_queue_size = approved_signal_queue.qsize() if approved_signal_queue else 0
-        
-        # Combine database metrics with real-time queue data
-        metrics = {
-            "signals_received": db_analytics.get("total_signals", 0),
-            "signals_approved": db_analytics.get("approved_signals", 0),
-            "signals_rejected": db_analytics.get("rejected_signals", 0),
-            "signals_forwarded_success": db_analytics.get("forwarded_success", 0),
-            "signals_forwarded_error": db_analytics.get("forwarded_error", 0),
-            "approved_queue_size": approved_queue_size,
-            "processing_queue_size": processing_queue_size,
-            "processing_workers_active": shared_state["signal_metrics"]["processing_workers_active"],
-            "forwarding_workers_active": shared_state["signal_metrics"]["forwarding_workers_active"],
-            "metrics_start_time": shared_state["signal_metrics"]["metrics_start_time"],
-            "data_source": "database_realtime"
-        }
-        return metrics
-    except Exception as e:
-        # Fallback to memory only if database fails
-        memory_metrics = shared_state["signal_metrics"].copy()
-        memory_metrics["approved_queue_size"] = approved_queue_size
-        memory_metrics["processing_queue_size"] = processing_queue_size
-        memory_metrics["data_source"] = "memory_fallback"
-        _logger.error(f"❌ METRICS: Error getting database metrics, using memory fallback: {e}")
-        return memory_metrics
+    """Get current metrics with memory as source of truth."""
+    # Get real-time queue sizes from memory (always available)
+    processing_queue_size = queue.qsize() if queue else 0
+    approved_queue_size = approved_signal_queue.qsize() if approved_signal_queue else 0
+    
+    # Use memory metrics as the source of truth for now
+    # TODO: Implement async database metrics retrieval for better accuracy
+    memory_metrics = shared_state["signal_metrics"].copy()
+    memory_metrics["approved_queue_size"] = approved_queue_size
+    memory_metrics["processing_queue_size"] = processing_queue_size
+    memory_metrics["data_source"] = "memory_realtime"
+    
+    return memory_metrics
 
 
 # ---------------------------------------------------------------------------- #

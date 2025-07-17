@@ -249,6 +249,28 @@
             background-color: #f8fff9;
         }
         
+        /* Active Strategy indicator styles */
+        .active-strategy-container {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-left: 4px solid #0dcaf0;
+            transition: all 0.3s ease;
+        }
+        
+        .active-strategy-container:hover {
+            border-left-color: #0a58ca;
+            box-shadow: 0 2px 8px rgba(13, 202, 240, 0.2);
+        }
+        
+        .strategy-status-icon {
+            animation: pulse-info 2s infinite;
+        }
+        
+        @keyframes pulse-info {
+            0% { color: #0dcaf0; }
+            50% { color: #0a58ca; }
+            100% { color: #0dcaf0; }
+        }
+        
         .status-indicator {
             width: 8px;
             height: 8px;
@@ -340,7 +362,7 @@
     <div class="container-fluid mt-4">
         <!-- Status Cards -->
         <div class="row mb-4">
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-primary" id="signalsReceived">-</div>
@@ -349,7 +371,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-success" id="signalsApproved">-</div>
@@ -358,7 +380,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-warning" id="signalsRejected">-</div>
@@ -367,24 +389,12 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card text-center">
                     <div class="card-body">
                         <div class="metric-value text-info" id="signalsForwarded">-</div>
                         <div class="metric-label">Signals Forwarded</div>
                         <small class="text-muted">Successfully sent</small>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card status-card bg-gradient bg-info text-white">
-                    <div class="card-body text-center">
-                        <i class="bi bi-bar-chart fs-1 mb-2"></i>
-                        <h6 class="card-title">Active Strategy</h6>
-                        <div id="activeStrategyIndicator">
-                            <div class="metric-value" id="activeStrategyName">-</div>
-                            <div class="metric-label" id="activeStrategyDescription">Loading...</div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -580,16 +590,31 @@
                 <div class="card mb-3">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-gear-fill"></i> Configuration
+                            <i class="bi bi-gear-fill"></i> Configuration & Strategy
                         </h5>
                     </div>
                     <div class="card-body">
-                        <button id="openConfigBtn" class="btn btn-primary w-100 mb-2">
-                            <i class="bi bi-sliders"></i> Open Configuration Panel
-                        </button>
-                        <button id="setTokenBtn" class="btn btn-outline-secondary w-100">
-                            <i class="bi bi-key"></i> Set Admin Token
-                        </button>
+                        <!-- Active Strategy Section -->
+                        <div class="active-strategy-container p-3 rounded mb-3">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="bi bi-bar-chart strategy-status-icon me-2 fs-5"></i>
+                                <h6 class="mb-0 text-dark fw-semibold">Active Strategy</h6>
+                            </div>
+                            <div id="activeStrategyIndicator" class="ms-4">
+                                <div class="fw-bold text-dark mb-1 fs-6" id="activeStrategyName">Loading...</div>
+                                <div class="text-muted small" id="activeStrategyDescription">Loading strategy information...</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Configuration Actions -->
+                        <div class="d-grid gap-2">
+                            <button id="openConfigBtn" class="btn btn-primary">
+                                <i class="bi bi-sliders me-2"></i> Open Configuration Panel
+                            </button>
+                            <button id="setTokenBtn" class="btn btn-outline-secondary">
+                                <i class="bi bi-key me-2"></i> Set Admin Token
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -973,8 +998,13 @@
         // INITIALIZATION
         // =========================================================================
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM Content Loaded - Starting initialization...');
+            
+            // Initialize WebSocket and core systems
             initializeWebSocket();
             initializeCharts();
+            
+            // Load initial data
             loadInitialData();
             bindEventHandlers();
 
@@ -984,8 +1014,12 @@
                     loadAuditTrail();
                     updateOrdersStats();
                     loadAdminActionsLog();
+                    // Also refresh active strategy indicator
+                    loadActiveStrategyIndicator();
                 }
             }, 30000);
+            
+            console.log('Application initialization completed');
         });
 
         // =========================================================================
@@ -1024,8 +1058,9 @@
          * Loads all initial data for the dashboard.
          */
         async function loadInitialData() {
+            console.log('Loading initial dashboard data...');
             try {
-                await Promise.all([
+                const loadPromises = [
                     loadSystemStatus(),
                     loadSellAllList(),
                     loadTopNTickers(),
@@ -1036,9 +1071,29 @@
                     loadReprocessingHealth(),
                     loadAdminActionsLog(),
                     updateChartsWithData(),
-                    loadActiveStrategyIndicator()
-                ]);
+                    loadActiveStrategyIndicator(),
+                    loadFinvizStrategies() // Ensure strategies are loaded on startup
+                ];
+                
+                // Load all data in parallel but handle errors gracefully
+                const results = await Promise.allSettled(loadPromises);
+                
+                // Log any failed loads
+                results.forEach((result, index) => {
+                    if (result.status === 'rejected') {
+                        const functionNames = [
+                            'loadSystemStatus', 'loadSellAllList', 'loadTopNTickers', 
+                            'loadAuditTrail', 'loadOrders', 'updateOrdersStats',
+                            'loadCleanupConfig', 'loadReprocessingHealth', 'loadAdminActionsLog',
+                            'updateChartsWithData', 'loadActiveStrategyIndicator', 'loadFinvizStrategies'
+                        ];
+                        console.warn(`Failed to load ${functionNames[index]}:`, result.reason);
+                    }
+                });
+                
+                console.log('Initial dashboard data loaded successfully');
             } catch (error) {
+                console.error('Error in loadInitialData:', error);
                 showAlert('Error loading initial dashboard data.', 'danger');
             }
         }
@@ -2064,8 +2119,28 @@
         async function loadFinvizStrategies() {
             console.log('Loading Finviz strategies...');
             
+            // Set loading state
+            const container = document.getElementById('finvizStrategiesList');
+            if (container) {
+                container.innerHTML = `
+                    <div class="text-center">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <small class="text-muted ms-2">Loading strategies...</small>
+                    </div>
+                `;
+            }
+            
             try {
-                const response = await fetch('/admin/finviz/strategies');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+                
+                const response = await fetch('/admin/finviz/strategies', {
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
                 console.log('Finviz strategies response status:', response.status);
                 
                 if (!response.ok) {
@@ -2077,14 +2152,27 @@
                 const responseData = await response.json();
                 console.log('Finviz strategies response data:', responseData);
                 
-                // Ensure we have an array of strategies
-                strategiesData = Array.isArray(responseData) ? responseData : [];
+                // Handle different response formats
+                let strategies = [];
+                if (Array.isArray(responseData)) {
+                    strategies = responseData;
+                } else if (responseData && Array.isArray(responseData.strategies)) {
+                    strategies = responseData.strategies;
+                } else if (responseData && responseData.data && Array.isArray(responseData.data)) {
+                    strategies = responseData.data;
+                } else {
+                    console.warn('Unexpected response format for strategies:', responseData);
+                    strategies = [];
+                }
+                
+                strategiesData = strategies;
                 console.log('Processed strategies data:', strategiesData);
+                console.log('Strategies count:', strategiesData.length);
                 
                 renderStrategiesList(strategiesData);
                 
                 // Update active strategy indicator
-                const activeStrategy = Array.isArray(strategiesData) ? strategiesData.find(s => s.is_active) : null;
+                const activeStrategy = strategiesData.find(s => s.is_active) || null;
                 updateActiveStrategyIndicator(activeStrategy);
                 
             } catch (error) {
@@ -2092,19 +2180,40 @@
                 strategiesData = []; // Reset to empty array on error
                 const container = document.getElementById('finvizStrategiesList');
                 if (container) {
-                    container.innerHTML = `
-                        <div class="alert alert-danger">
-                            <i class="bi bi-exclamation-triangle"></i> Error loading strategies: ${error.message}
-                            <br><small>Check browser console for details</small>
-                        </div>
-                    `;
+                    if (error.name === 'AbortError') {
+                        container.innerHTML = `
+                            <div class="alert alert-warning">
+                                <i class="bi bi-clock"></i> Request timed out. Please try again.
+                                <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadFinvizStrategies()">
+                                    <i class="bi bi-arrow-clockwise"></i> Retry
+                                </button>
+                            </div>
+                        `;
+                    } else {
+                        container.innerHTML = `
+                            <div class="alert alert-danger">
+                                <i class="bi bi-exclamation-triangle"></i> Error loading strategies: ${error.message}
+                                <br><small>Check browser console for details</small>
+                                <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadFinvizStrategies()">
+                                    <i class="bi bi-arrow-clockwise"></i> Retry
+                                </button>
+                            </div>
+                        `;
+                    }
                 }
+                
+                // Update active strategy indicator with null
+                updateActiveStrategyIndicator(null);
             }
         }
         
         // Render strategies list
         function renderStrategiesList(strategies) {
             const container = document.getElementById('finvizStrategiesList');
+            if (!container) {
+                console.warn('finvizStrategiesList container not found in DOM');
+                return;
+            }
             
             // Ensure strategies is always an array
             if (!Array.isArray(strategies)) {
@@ -2179,14 +2288,19 @@
             const nameElement = document.getElementById('activeStrategyName');
             const descElement = document.getElementById('activeStrategyDescription');
             
+            if (!nameElement || !descElement) {
+                console.warn('Active strategy indicator elements not found in DOM');
+                return;
+            }
+            
             if (activeStrategy && activeStrategy.name) {
                 console.log('Setting active strategy:', activeStrategy.name);
-                if (nameElement) nameElement.textContent = activeStrategy.name;
-                if (descElement) descElement.textContent = activeStrategy.description || 'No description';
+                nameElement.textContent = activeStrategy.name;
+                descElement.textContent = activeStrategy.description || 'No description available';
             } else {
                 console.log('No active strategy found, setting default text');
-                if (nameElement) nameElement.textContent = 'None';
-                if (descElement) descElement.textContent = 'No active strategy';
+                nameElement.textContent = 'None';
+                descElement.textContent = 'No active strategy configured';
             }
         }
         
@@ -2310,7 +2424,7 @@
                 const response = await fetch(`/admin/finviz/strategies/${strategyId}/duplicate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token, name: newName.trim() })
+                    body: JSON.stringify({ token, new_name: newName.trim() })
                 });
                 
                 if (response.ok) {
@@ -2560,6 +2674,21 @@
         // UTILITY FUNCTIONS
         // ============================================================================
         
+        // ============================================================================
+        // DEBUG AND UTILITY FUNCTIONS
+        // ============================================================================
+        
+        // Debug function that can be called from browser console
+        window.debugStrategies = function() {
+            console.log('=== DEBUG: Strategy loading diagnostics ===');
+            console.log('1. Current strategies data:', strategiesData);
+            console.log('2. Testing active strategy indicator...');
+            loadActiveStrategyIndicator();
+            console.log('3. Testing finviz strategies list...');
+            loadFinvizStrategies();
+            console.log('=== DEBUG END ===');
+        };
+        
         // Truncate URL for display
         function truncateUrl(url) {
             if (!url) return '-';
@@ -2704,14 +2833,25 @@
                 console.log('Active strategy response:', response.status, response.ok);
                 
                 if (response.ok) {
-                    const activeStrategy = await response.json();
-                    console.log('Active strategy data:', activeStrategy);
+                    const responseData = await response.json();
+                    console.log('Active strategy response data:', responseData);
+                    
+                    // Handle the correct response format: {"active_strategy": {...}}
+                    let activeStrategy = null;
+                    if (responseData && responseData.active_strategy && responseData.active_strategy.name) {
+                        activeStrategy = responseData.active_strategy;
+                    }
+                    
+                    console.log('Processed active strategy:', activeStrategy);
                     updateActiveStrategyIndicator(activeStrategy);
                 } else if (response.status === 404) {
                     console.log('No active strategy found (404), setting to null');
                     updateActiveStrategyIndicator(null);
                 } else {
                     console.warn('Active strategy API returned:', response.status);
+                    const errorText = await response.text();
+                    console.warn('Error response:', errorText);
+                    updateActiveStrategyIndicator(null);
                 }
             } catch (error) {
                 console.error('Error loading active strategy indicator:', error);
