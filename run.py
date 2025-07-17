@@ -351,9 +351,6 @@ MAX_REQ_PER_MIN=59
 # Máximo requests concorrentes ao Finviz
 MAX_CONCURRENCY=20
 
-# Finviz configuration file
-FINVIZ_CONFIG_FILE=finviz_config.json
-
 # Intervalo padrão de refresh de tickers
 DEFAULT_TICKER_REFRESH_SEC=10
 
@@ -515,7 +512,7 @@ def auto_fix_common_issues(use_sudo: bool = False) -> bool:
         # 4. Check and fix permissions
         print("🔍 Checking file permissions...")
         try:
-            config_files = ['finviz_config.json', 'webhook_config.json', 'system_config.json']
+            config_files = ['webhook_config.json', 'system_config.json']
             for config_file in config_files:
                 if not os.path.exists(config_file):
                     with open(config_file, 'w') as f:
@@ -685,7 +682,6 @@ def setup_maximum_permissions() -> bool:
     try:
         # Set permissions for configuration files
         config_files = [
-            'finviz_config.json',
             'webhook_config.json', 
             'system_config.json'
         ]
@@ -900,7 +896,7 @@ def update_application(use_sudo: bool = False) -> bool:
     
     # 1. Backup current configuration files
     print_step("📦 Backing up current configuration files...")
-    config_files = ['finviz_config.json', 'webhook_config.json', 'system_config.json', '.env']
+    config_files = ['webhook_config.json', 'system_config.json', '.env']
     backup_dir = Path("config_backup")
     backup_dir.mkdir(exist_ok=True)
     
@@ -996,13 +992,6 @@ def create_missing_config_files() -> None:
     print_step("🔧 Creating missing configuration files...")
     
     config_defaults = {
-        'finviz_config.json': {
-            "finviz_url": "https://finviz.com/screener.ashx?v=150&f=sh_curvol_o200,sh_price_0.6to20,ta_changeopen_4to&ft=4&o=-changeopen&ar=10&c=0,1,24,25,60,64,67,86,87,65",
-            "top_n": 15,
-            "refresh_interval_sec": 10,
-            "reprocess_enabled": True,
-            "reprocess_window_seconds": 0
-        },
         'webhook_config.json': {},
         'system_config.json': {}
     }

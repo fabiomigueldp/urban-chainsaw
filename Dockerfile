@@ -41,7 +41,6 @@ COPY . .
 # Create necessary directories and set maximum permissions
 RUN mkdir -p /app/logs /app/data \
     && chmod 777 /app /app/logs /app/data \
-    && chmod 666 /app/finviz_config.json || touch /app/finviz_config.json && chmod 666 /app/finviz_config.json \
     && chmod 666 /app/*.py /app/*.json || true
 
 # Run as root for maximum permissions
