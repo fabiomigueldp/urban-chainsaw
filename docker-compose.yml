@@ -71,7 +71,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./finviz_config.json:/app/finviz_config.json
     
     # Health check
     healthcheck:
