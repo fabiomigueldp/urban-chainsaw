@@ -2884,15 +2884,18 @@
                     return;
                 }
                 
-                const response = await fetch('/admin/webhook/update', {
+                // Use the system config endpoint that can handle both URL and timeout
+                const response = await fetch('/admin/system/config', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
                         token: token,
-                        webhook_url: webhookUrl,
-                        timeout: parseInt(webhookTimeout) || 5
+                        webhook: {
+                            url: webhookUrl,
+                            timeout: parseInt(webhookTimeout) || 5
+                        }
                     })
                 });
                 
@@ -2920,7 +2923,7 @@
                 
                 // Update max requests per minute if provided
                 if (maxReqPerMin) {
-                    const maxReqResponse = await fetch('/admin/webhook-rate-limiter/update-max-req', {
+                    const maxReqResponse = await fetch('/admin/webhook-rate-limiter/update', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
