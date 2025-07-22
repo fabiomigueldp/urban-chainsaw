@@ -55,12 +55,12 @@ class Settings(BaseSettings):
     # Worker pool                                                         #
     # ------------------------------------------------------------------ #
     WORKER_CONCURRENCY: int = Field(
-        16,
+        8,
         description="Number of background workers processing the queue."
     )
     
     FORWARDING_WORKERS: int = Field(
-        5,
+        3,
         description="Number of dedicated workers for forwarding approved signals with rate limiting."
     )
 
@@ -166,17 +166,17 @@ class Settings(BaseSettings):
     )
     
     DATABASE_POOL_SIZE: int = Field(
-        20,
+        8,
         description="Database connection pool size."
     )
     
     DATABASE_MAX_OVERFLOW: int = Field(
-        30,
+        12,
         description="Maximum overflow connections in pool."
     )
     
     DATABASE_POOL_RECYCLE: int = Field(
-        3600,
+        7200,
         description="Connection recycle time in seconds."
     )
     

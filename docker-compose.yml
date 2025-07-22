@@ -8,11 +8,29 @@ services:
       - POSTGRES_DB=trading_signals
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres123}
+      # 🎯 POSTGRESQL OPTIMIZATIONS FOR VPS CX22 (2 vCPUs, 4GB RAM)
+      - POSTGRES_SHARED_BUFFERS=128MB      # 25% of limited memory (512MB)
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=256MB # 50% of limited memory
+      - POSTGRES_WORK_MEM=4MB              # Adequate for simple queries
+      - POSTGRES_MAINTENANCE_WORK_MEM=64MB # For maintenance operations
+      - POSTGRES_MAX_CONNECTIONS=50        # Adequate for application
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    # 🎯 RESOURCE LIMITS - ELIMINATES OOM KILLER
+    deploy:
+      resources:
+        limits:
+          memory: 512M      # ✅ OOM KILLER CONTROL
+          cpus: '1.0'       # ✅ PREVENTS CPU COMPETITION
+        reservations:
+          memory: 256M      # ✅ GUARANTEES MINIMUM
+          cpus: '0.5'       # ✅ CPU BASELINE
+    # 🎯 SECURITY: REMOVE PRIVILEGED MODE
+    # privileged: false   # Not necessary for PostgreSQL
+    # user: postgres      # User already configured in image
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d trading_signals"]
       interval: 10s
@@ -32,9 +50,9 @@ services:
       postgres:
         condition: service_healthy
     
-    # Run with maximum privileges
-    privileged: true
-    user: root
+    # 🎯 SECURITY: REMOVED PRIVILEGED MODE & ROOT USER
+    # privileged: true    # ❌ REMOVED - unnecessary security risk
+    # user: root          # ❌ REMOVED - additional unnecessary risk
     
     # Environment variables for production
     environment:
@@ -43,8 +61,8 @@ services:
       - SERVER_PORT=80
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - TOP_N=${TOP_N:-15}
-      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-16}
-      - FORWARDING_WORKERS=${FORWARDING_WORKERS:-5}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-8}        # ⬇️ REDUCED 16→8 (50%)
+      - FORWARDING_WORKERS=${FORWARDING_WORKERS:-3}        # ⬇️ REDUCED 5→3 (40%)
       - FINVIZ_REFRESH_SEC=${FINVIZ_REFRESH_SEC:-3}
       - FINVIZ_USE_ELITE=${FINVIZ_USE_ELITE:-false}
       - FINVIZ_EMAIL=${FINVIZ_EMAIL:-}
@@ -53,11 +71,12 @@ services:
       - DEST_WEBHOOK_RATE_LIMITING_ENABLED=${DEST_WEBHOOK_RATE_LIMITING_ENABLED:-true}
       - DEST_WEBHOOK_TIMEOUT=${DEST_WEBHOOK_TIMEOUT:-5}
       - MAP_SIDE_TO_ACTION_TRADERSPOST=${MAP_SIDE_TO_ACTION_TRADERSPOST:-true}
-      # Database configuration
+      # Database configuration - 🎯 OPTIMIZED FOR VPS CX22
       - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/trading_signals
       - DATABASE_ECHO=${DATABASE_ECHO:-false}
-      - DATABASE_POOL_SIZE=${DATABASE_POOL_SIZE:-20}
-      - DATABASE_MAX_OVERFLOW=${DATABASE_MAX_OVERFLOW:-30}
+      - DATABASE_POOL_SIZE=${DATABASE_POOL_SIZE:-8}         # ⬇️ REDUCED 20→8 (60%)
+      - DATABASE_MAX_OVERFLOW=${DATABASE_MAX_OVERFLOW:-12}  # ⬇️ REDUCED 30→12 (60%)
+      - DATABASE_POOL_RECYCLE=${DATABASE_POOL_RECYCLE:-7200} # ⬆️ INCREASED 3600→7200 (100%)
       - DUAL_WRITE_ENABLED=${DUAL_WRITE_ENABLED:-false}
       - DATABASE_ONLY_MODE=${DATABASE_ONLY_MODE:-true}
       - SIGNAL_RETENTION_DAYS=${SIGNAL_RETENTION_DAYS:-30}

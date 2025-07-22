@@ -319,12 +319,12 @@ FINVIZ_EMAIL=
 FINVIZ_PASSWORD=
 
 # =============================================================================
-# CONFIGURAÇÕES DE WORKERS
+# WORKER CONFIGURATIONS - OPTIMIZED FOR DEVELOPMENT
 # =============================================================================
-# Number of workers to process main queue
+# Number of workers to process main queue - OPTIMIZED VALUES
 WORKER_CONCURRENCY=4
 
-# Número de workers dedicados para forwarding (com rate limit)
+# Number of dedicated workers for forwarding (with rate limiting) 
 FORWARDING_WORKERS=2
 
 # =============================================================================

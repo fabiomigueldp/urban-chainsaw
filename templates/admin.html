@@ -1440,8 +1440,9 @@
             if (processingQueueSize) processingQueueSize.textContent = metrics.processing_queue_size ?? 0;
             if (approvedQueueSize) approvedQueueSize.textContent = metrics.approved_queue_size ?? 0;
             
-            const maxProcessingWorkers = 16;
-            const maxForwardingWorkers = 5;
+            // 🎯 UPDATED VALUES FOR VPS CX22 OPTIMIZATION
+            const maxProcessingWorkers = 8;    // REDUCED from 16 to 8 (50%)
+            const maxForwardingWorkers = 3;    // REDUCED from 5 to 3 (40%)
             const activeProcessing = metrics.processing_workers_active ?? 0;
             const activeForwarding = metrics.forwarding_workers_active ?? 0;
             
