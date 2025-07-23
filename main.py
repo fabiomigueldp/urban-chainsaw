@@ -908,6 +908,8 @@ async def _startup() -> None:
     _logger.info("Signal tracker cleanup task started")    # Start periodic admin updates task
     async def admin_updates_task():
         """Send periodic updates to admin clients via WebSocket."""
+        last_audit_timestamp = datetime.datetime.utcnow()
+
         while True:
             try:
                 await asyncio.sleep(5)  # Update every 5 seconds for real-time data
@@ -916,6 +918,12 @@ async def _startup() -> None:
                 if len(comm_engine.active_connections) > 0:
                     # Send comprehensive status update with real-time database data
                     try:
+                        # Fetch new audit trail events
+                        new_events = await db_manager.get_audit_trail_since(last_audit_timestamp)
+                        if new_events:
+                            last_audit_timestamp = new_events[0]['timestamp'] # most recent is first
+                            await comm_engine.broadcast("audit_trail_update", {"events": new_events})
+
                         current_metrics = get_current_metrics()
                         system_info = await get_system_info_data()
                         

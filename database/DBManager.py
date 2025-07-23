@@ -493,9 +493,35 @@ class DBManager:
         response = await self.query_signals(query_params)
         return response.entries
 
+    async def get_audit_trail_since(self, timestamp: datetime) -> List[Dict[str, Any]]:
+        """
+        Retrieves all audit trail events since a given timestamp.
+        """
+        async with self.get_session() as session:
+            stmt = (
+                select(SignalEvent)
+                .where(SignalEvent.timestamp > timestamp)
+                .order_by(desc(SignalEvent.timestamp))
+            )
+            result = await session.execute(stmt)
+            events = result.scalars().all()
+            return [self._event_to_dict(e) for e in events]
+
+    def _event_to_dict(self, event: SignalEvent) -> Dict[str, Any]:
+        """Converts a SQLAlchemy SignalEvent object to a dictionary for the API."""
+        return {
+            "timestamp": event.timestamp.isoformat(),
+            "signal_id": str(event.signal_id),
+            "event_type": event.status,
+            "location": self._derive_location_from_status(event.status),
+            "details": event.details or "-",
+            "worker_id": event.worker_id or "-",
+            "http_status": event.http_status,
+        }
+
     async def get_rejected_signals_for_reprocessing(self, ticker: str, window_seconds: int, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Retrieves signals for a specific ticker that were rejected within a given time window.
+        Retrievels signals for a specific ticker that were rejected within a given time window.
         If window_seconds is 0, it retrieves all rejected signals for the ticker (infinite window).
         Returns a list of dictionaries, where each dictionary represents a signal.
         """
