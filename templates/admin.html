@@ -1004,7 +1004,6 @@
             // Auto-refresh key components periodically
             setInterval(() => {
                 if (!document.hidden) { // Only refresh if tab is active
-                    loadAuditTrail();
                     loadOrders(); // Add real-time orders refresh
                     updateOrdersStats();
                     loadAdminActionsLog();
@@ -1328,6 +1327,9 @@
                     if (logTab?.classList.contains('active') && adminActionsCurrentPage === 1) {
                         loadAdminActionsLog();
                     }
+                },
+                'audit_trail_update': (d) => {
+                    updateAuditTrail(d.events);
                 }
             };
 
@@ -1336,6 +1338,27 @@
             } else {
                 console.warn(`⚠️ No handler for WebSocket message type: ${data.type}`);
             }
+        }
+
+        function updateAuditTrail(events) {
+            const tbody = document.getElementById('auditTableBody');
+            if (!tbody) return;
+
+            const newRows = events.map(event => `
+                <tr>
+                    <td><small>${new Date(event.timestamp).toLocaleString()}</small></td>
+                    <td><code>${escapeHtml(event.signal_id).substring(0, 8)}</code></td>
+                    <td><strong>${escapeHtml(event.ticker)}</strong></td>
+                    <td>${getSignalTypeBadge(event.signal_type)}</td>
+                    <td>${getStatusBadge(event.event_type)}</td>
+                    <td>${getLocationBadge(event.location)}</td>
+                    <td><small>${escapeHtml(event.worker_id) || '-'}</small></td>
+                    <td><small>${escapeHtml(event.details) || '-'}</small></td>
+                    <td>${event.http_status ?? '-'}</td>
+                </tr>
+            `).join('');
+
+            tbody.insertAdjacentHTML('afterbegin', newRows);
         }
 
         // =========================================================================
